@@ -132,7 +132,7 @@ class Agent:
                 yield "No good PDFs found. Using web snippets.\n\n"
             else:
                 for d in docs:
-                    yield f"- {d['title']}\n"
+                    yield f"- [{d['title']}]({d['url']}) (score: {d.get('score', 0):.2f})\n"
                 yield "\n"
 
             yield "**Parsing**...\n\n"
@@ -149,9 +149,9 @@ class Agent:
                             "parsed_content": text[:2000],
                         }).execute
                     )
-                    yield f"- {d['title']}: {len(text)} chars\n"
+                    yield f"- [{d['title']}]({d['url']}): {len(text)} chars\n"
                 else:
-                    yield f"- Failed: {d['title']}\n"
+                    yield f"- Failed: [{d['title']}]({d['url']})\n"
             yield "\n"
 
             if texts:

@@ -7,6 +7,7 @@ from typing import List, Optional
 
 from llama_index.core import Document, Settings, StorageContext, VectorStoreIndex
 from llama_index.embeddings.openai import OpenAIEmbedding
+from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.vector_stores.qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 
@@ -55,12 +56,20 @@ class SessionVectorStore:
         self._fallback[session_id] = chunks
         return len(chunks)
 
-    def _index_qdrant(self, session_id: str, texts: List[str]) -> int:
-        embed_model = OpenAIEmbedding(
+    def _get_embed_model(self):
+        if "localhost:11434" in settings.openai_base_url or "127.0.0.1:11434" in settings.openai_base_url:
+            return OllamaEmbedding(
+                model_name="nomic-embed-text",
+                base_url=settings.openai_base_url.replace("/v1", ""),
+            )
+        return OpenAIEmbedding(
             api_key=settings.openai_api_key or "dummy",
             api_base=settings.openai_base_url,
             model="text-embedding-3-small",
         )
+
+    def _index_qdrant(self, session_id: str, texts: List[str]) -> int:
+        embed_model = self._get_embed_model()
         Settings.embed_model = embed_model
 
         vector_store = QdrantVectorStore(
@@ -94,11 +103,7 @@ class SessionVectorStore:
         return [c for _, c in scored[:top_k]]
 
     def _query_qdrant(self, session_id: str, query: str, top_k: int) -> List[str]:
-        embed_model = OpenAIEmbedding(
-            api_key=settings.openai_api_key or "dummy",
-            api_base=settings.openai_base_url,
-            model="text-embedding-3-small",
-        )
+        embed_model = self._get_embed_model()
         Settings.embed_model = embed_model
 
         vector_store = QdrantVectorStore(
