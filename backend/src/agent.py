@@ -295,26 +295,7 @@ class Agent:
 
         print(f"[Agent] Pipeline complete in {time.time()-start_time:.1f}s")
 
-        # Validation & backtest
-        validation_md = ""
-        recommended_tickers = [s["ticker"] for s in scored]
-        if not scored:
-            validation_md += "\n**Note:** The research corpus does not explicitly mention specific stock tickers.\n\n"
-        if "aschenbrenner" in query.lower() or "situational awareness" in query.lower():
-            from src.tools.backtest import backtest_recommendations, print_backtest_report, validate_against_thesis, ASCHENBRENNER_HOLDINGS
-            if recommended_tickers:
-                bt = backtest_recommendations(recommended_tickers)
-                validation_md += "\n" + print_backtest_report(bt) + "\n"
-            v = validate_against_thesis(recommended_tickers)
-            validation_md += f"\n**Aschenbrenner match rate:** {v['match_rate']*100:.0f}% ({len(v['matches'])}/{len(recommended_tickers)})\n"
-            if v["missed_holdings"]:
-                validation_md += f"\n**Holdings from 13F not captured:** {', '.join(v['missed_holdings'])}\n"
-            # Always show reference portfolio backtest
-            ref_bt = backtest_recommendations(list(ASCHENBRENNER_HOLDINGS.keys()))
-            validation_md += "\n### Reference: Aschenbrenner's Actual 13F Portfolio\n"
-            validation_md += print_backtest_report(ref_bt) + "\n"
-
-        text = self._format(parsed, scored) + validation_md
+        text = self._format(parsed, scored)
         await asyncio.to_thread(
             self.db.table("messages").insert({
                 "session_id": session_id, "role": "assistant", "content": text

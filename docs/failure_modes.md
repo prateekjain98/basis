@@ -7,8 +7,8 @@ This document catalogs every known way the Basis agent breaks in production, gro
 | # | Failure | Category | Severity | Status |
 |---|---------|----------|----------|--------|
 | 1 | [LLM synthesis dies with no provider](#1-llm-synthesis-dies-with-no-provider) | LLM Reliability | P0 — Blocking | Mitigated |
-| 2 | [JSON mode ignored by local LLM](#2-json-mode-ignored-by-local-llm) | LLM Reliability | P1 — Degraded | Mitigated |
-| 3 | [Embedding model unavailable](#3-embedding-model-unavailable) | LLM Reliability | P1 — Degraded | Mitigated |
+| 2 | [JSON mode ignored by local LLM](#2-json-mode-ignored-by-local-llm) | LLM Reliability | P1 — Degraded | Fixed |
+| 3 | [Embedding model unavailable](#3-embedding-model-unavailable) | LLM Reliability | P1 — Degraded | Fixed |
 | 4 | [Frontend white-screen on empty models](#4-frontend-white-screen-on-empty-models) | Frontend | P0 — Blocking | Fixed |
 | 5 | [Streaming connection drops](#5-streaming-connection-drops) | Frontend | P1 — Degraded | Open |
 | 6 | [DDG search returns non-PDFs](#6-ddg-search-returns-non-pdfs) | Document Pipeline | P1 — Degraded | Mitigated |
@@ -463,6 +463,34 @@ None.
 3. Separate "live" evals (flaky, tests end-to-end) from "stable" evals (deterministic, tests logic).
 
 **Effort:** 3–4 hours
+
+---
+
+## 14. LLM produces empty stocks on abstract thesis
+
+**Category:** LLM Reliability  
+**Severity:** P1 — Degraded  
+**Status:** Fixed
+
+**What goes wrong:** When the research corpus describes investment themes abstractly (e.g., "data centers need more power") without naming specific companies, the LLM returns empty stocks or generic chip stocks instead of mapping themes to pure-play beneficiaries.
+
+**Root cause:** The original prompt required stocks to be "explicitly mentioned" in the corpus. Strategic theses don't mention tickers. The LLM needs permission to use its market knowledge to map themes → companies.
+
+**Fix:** Updated prompt to instruct a two-step process: (1) extract themes from corpus, (2) map themes to specific public companies with logical chain rationale.
+
+---
+
+## 15. DDG search connection pool exhaustion
+
+**Category:** Document Pipeline  
+**Severity:** P0 — Blocking  
+**Status:** Fixed
+
+**What goes wrong:** All DDG search queries fail with `dns error > no connections available`. Document discovery returns 0 PDFs.
+
+**Root cause:** `duckduckgo-search` v8.1.1 creates new `httpx` client per `DDGS()` instance. Running 4 queries in quick succession from `ThreadPoolExecutor` exhausts the connection pool. Fallback engines (Yahoo, Brave, Google) also timeout.
+
+**Fix:** Add 1-second delay between sequential queries in `_discover_candidates`. Reduce DDG timeout from default 30s to 15s. Reduce retries from 3 to 2.
 
 ---
 
