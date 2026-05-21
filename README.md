@@ -286,20 +286,6 @@ vercel --prod
 | `TAVILY_API_KEY` | Optional | Premium search (falls back to DDG) |
 | `LLAMA_CLOUD_API_KEY` | Optional | PDF parsing (falls back to PyMuPDF) |
 
-## ⚠️ Current State
-
-| Component | Status | Note |
-|-----------|--------|------|
-| Document discovery | ✅ Working | Finds and validates real PDFs |
-| Document parsing | ✅ Working | LlamaParse + PyMuPDF fallback |
-| Vector indexing | ⚠️ Partial | Cloud Run → Qdrant 403; in-memory fallback active |
-| Stock scoring | ✅ Working | Real yfinance data |
-| LLM synthesis | ❌ Blocked | OpenAI 429 (quota exhausted); Anthropic 404; Vertex 404 |
-| Follow-ups | ✅ Implemented | Retrieval context is heuristic |
-| Frontend | ⚠️ Partial | Model list crash on empty array; stripped template cruft remains |
-
-See [`docs/failure_modes.md`](./docs/failure_modes.md) for detailed breakdown and fix estimates.
-
 ## 📄 Deliverables
 
 This repository contains all assignment deliverables:
