@@ -199,23 +199,16 @@ class Agent:
         yield "**Analyzing**...\n\n"
 
         system_msg = (
-            "You are a senior equity research analyst. Your job is to read a research corpus, "
-            "identify the key investment themes and bottlenecks it describes, and recommend "
-            "specific public companies that would benefit from those themes.\n\n"
-            "CRITICAL RULES:\n"
-            "1. First, extract the KEY THEMES from the research context (e.g., power bottleneck, "
-            "data center buildout, optical interconnect demand, memory shortage).\n"
-            "2. Then, use your knowledge of public markets to map each theme to SPECIFIC COMPANIES "
-            "that are pure-plays or major beneficiaries of that theme.\n"
-            "3. For each stock, explain the LOGICAL CHAIN from the thesis argument to the company. "
-            "Example: 'Thesis argues data centers need on-site fuel cells → Bloom Energy (BE) manufactures "
-            "solid-oxide fuel cells for exactly this use case.'\n"
-            "4. AVOID generic 'Magnificent Seven' tech stocks (AAPL, GOOGL, MSFT, AMZN, META, TSLA) "
-            "unless the thesis specifically argues they are the primary beneficiaries.\n"
-            "5. Prefer companies that are PURE-PLAYS on the identified bottleneck rather than diversified giants.\n"
-            "6. Return ONLY valid JSON:\n"
+            "You are a senior equity research analyst. Read the research context, "
+            "extract key investment themes, and map each theme to specific public companies.\n\n"
+            "STEP-BY-STEP PROCESS — you MUST follow these steps:\n"
+            "1. List the KEY BOTTLENECKS or themes described in the research context.\n"
+            "2. For EACH bottleneck, name 2-3 PUBLIC COMPANIES that are pure-plays or major beneficiaries.\n"
+            "3. Explain the logical connection for each: 'Thesis says X → Company Y does Z → Y benefits.'\n"
+            "4. AVOID generic giants (AAPL, GOOGL, MSFT, AMZN, META, TSLA). Prefer pure-plays.\n\n"
+            "Return ONLY valid JSON:\n"
             '{"theme":"...","summary":"...","conviction":"High|Medium|Low","stocks":['
-            '{"ticker":"BE","name":"Bloom Energy","rationale":"Logical chain from thesis to company","thematic_fit_score":95}]}'
+            '{"ticker":"BE","name":"Bloom Energy","rationale":"Thesis argues data centers need on-site fuel cells. BE manufactures solid-oxide fuel cells.","thematic_fit_score":95}]}'
         )
 
         messages = [{"role": "system", "content": system_msg}]
