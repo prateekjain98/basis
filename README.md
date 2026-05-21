@@ -1,4 +1,4 @@
-# Portfolio Research Agent
+# finquill
 
 A conversational agent for institutional-grade investment research. Given a company or theme, the agent conducts multi-step research — aggregating financial data and web sources — then synthesizes a structured investment thesis with conviction levels, key risks, and a price target rationale.
 
@@ -42,7 +42,7 @@ User Input (research prompt)
 | **Thesis Synthesizer** | Structures raw data into an investment thesis | LLM with structured output |
 | **Session Memory** | Persists conversation context across turns | In-memory + Pydantic models |
 
-## Tools (≥ 2 Required)
+## Tools (>= 2 Required)
 
 1. **Financial Data Tool** — Gets real-time and historical stock data, balance sheet, income statement, cash flow.
 2. **Web Search Tool** — Finds recent news, earnings transcripts, analyst reports, and industry context.
@@ -90,7 +90,6 @@ Metrics tracked:
 │       ├── __init__.py
 │       └── schemas.py        # Pydantic models for inputs/outputs
 ├── eval/
-│   ├── __init__.py
 │   ├── test_cases.json       # 20+ test prompts
 │   ├── run_eval.py           # Eval runner
 │   └── metrics.py            # Scoring logic
@@ -104,8 +103,8 @@ Metrics tracked:
 
 ```bash
 # Clone
-git clone https://github.com/YOUR_USERNAME/portfolio-research-agent.git
-cd portfolio-research-agent
+git clone https://github.com/prateekjain98/finquill.git
+cd finquill
 
 # Setup
 python -m venv .venv
@@ -117,7 +116,7 @@ cp .env.example .env
 # Add your API keys (LLM provider, web search, etc.)
 
 # Run
-python src/agent.py
+python src/agent.py "Bull case for Tata Motors" --ticker TATAMOTORS.NS
 ```
 
 ## Why This Framework
@@ -125,7 +124,7 @@ python src/agent.py
 See [`docs/architecture.md`](docs/architecture.md) for the full ADR. Key decisions:
 
 - **No heavy frameworks** — Raw Python with Pydantic for control and transparency. The evaluator should understand the agent in 10 minutes.
-- **Explicit state machine** — Every turn is `plan → tool call → observe → synthesize`. No black-box "agent loops."
+- **Explicit state machine** — Every turn is `plan --> tool call --> observe --> synthesize`. No black-box agent loops.
 - **Structured outputs everywhere** — Every LLM call returns typed Pydantic objects, not free text. This prevents hallucination and makes eval deterministic.
 
 ## Known Limitations
@@ -133,9 +132,9 @@ See [`docs/architecture.md`](docs/architecture.md) for the full ADR. Key decisio
 | Limitation | Why | Fix Priority |
 |------------|-----|-------------|
 | Single-session memory only | No persistence layer yet | Low for PS3 scope |
-| Web search quality depends on search API | Garbage in, garbage out | Medium — add source reliability scoring |
+| Web search quality depends on search API | Garbage in, garbage out | Medium -- add source reliability scoring |
 | No real-time price streaming | Polling only | Out of scope |
-| Financial data limited to yfinance coverage | Exchange coverage gaps | Medium — add fallback data source |
+| Financial data limited to yfinance coverage | Exchange coverage gaps | Medium -- add fallback data source |
 
 ## License
 
