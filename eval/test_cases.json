@@ -1,0 +1,93 @@
+[
+  {
+    "id": "tc-01",
+    "name": "Simple ticker query",
+    "prompt": "Thesis on NVDA",
+    "expected_tools": ["financial_data", "web_search"],
+    "rubric": {
+      "has_thesis": true,
+      "has_rationale": true,
+      "has_risks": true,
+      "has_conviction": true,
+      "grounded_in_data": true
+    }
+  },
+  {
+    "id": "tc-02",
+    "name": "Thematic query without ticker",
+    "prompt": "Investment thesis on AI infrastructure buildout",
+    "expected_tools": ["web_search"],
+    "rubric": {
+      "has_thesis": true,
+      "has_rationale": true,
+      "has_risks": true,
+      "has_conviction": true,
+      "grounded_in_data": true
+    }
+  },
+  {
+    "id": "tc-03",
+    "name": "Follow-up in session",
+    "prompt": "What are the key risks?",
+    "session_context": "Previous thesis on NVDA with HIGH conviction",
+    "expected_tools": [],
+    "rubric": {
+      "recalls_context": true,
+      "has_risks": true
+    }
+  },
+  {
+    "id": "tc-04",
+    "name": "Ambiguous prompt",
+    "prompt": "Is this a good buy?",
+    "expected_tools": ["web_search"],
+    "rubric": {
+      "graceful_degradation": true,
+      "acknowledges_ambiguity": true
+    }
+  },
+  {
+    "id": "tc-05",
+    "name": "Tool failure — bad ticker",
+    "prompt": "Thesis on XYZFAKE123",
+    "expected_tools": ["financial_data", "web_search"],
+    "rubric": {
+      "graceful_degradation": true,
+      "thesis_still_generated": true,
+      "acknowledges_data_gap": true
+    }
+  },
+  {
+    "id": "tc-06",
+    "name": "Indian market context",
+    "prompt": "Thesis on Reliance Industries",
+    "expected_tools": ["financial_data", "web_search"],
+    "rubric": {
+      "has_thesis": true,
+      "has_rationale": true,
+      "has_risks": true
+    }
+  },
+  {
+    "id": "tc-07",
+    "name": "Multi-turn session memory",
+    "prompt": "Compare that to AMD",
+    "session_context": "Previous thesis on NVDA",
+    "expected_tools": ["financial_data", "web_search"],
+    "rubric": {
+      "recalls_context": true,
+      "comparison_made": true
+    }
+  },
+  {
+    "id": "tc-08",
+    "name": "No search results scenario",
+    "prompt": "Thesis on a very obscure private company",
+    "expected_tools": ["web_search"],
+    "rubric": {
+      "graceful_degradation": true,
+      "acknowledges_data_gap": true,
+      "no_hallucinated_financials": true
+    }
+  }
+]

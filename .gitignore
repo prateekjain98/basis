@@ -1,0 +1,21 @@
+# Backend
+backend/.venv/
+backend/__pycache__/
+backend/src/**/__pycache__/
+backend/.env
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+
+# Eval
+eval/outputs/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
