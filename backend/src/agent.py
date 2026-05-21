@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import uuid
 from typing import AsyncIterator, List, Optional
 
@@ -207,8 +208,12 @@ class Agent:
 
         try:
             raw = await _llm_chat(self.client, messages, self.model, temperature=0.3, max_tokens=2000)
-            raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-            parsed = json.loads(raw)
+            # Extract JSON from markdown fences or plain text preamble
+            json_match = re.search(r'```json\s*(\{.*\})\s*```', raw, re.DOTALL)
+            if not json_match:
+                json_match = re.search(r'\{.*\}', raw, re.DOTALL)
+            json_str = json_match.group(1) if json_match else raw
+            parsed = json.loads(json_str)
         except Exception as e:
             yield f"LLM error: {e}\n\n"
             parsed = {"theme": query, "summary": "", "conviction": "Medium", "stocks": []}
