@@ -1,186 +1,145 @@
-# Basis
+# basis
 
-> An autonomous research agent that finds, reads, and reasons over investment documents to generate scored stock theses.
+Agent that searches the web for investment reports, reads them, and tells you what stocks to buy.
 
-Basis is a document-driven conversational agent. You describe an investment theme — "AI infrastructure," "DeepSeek disruption," "India renewables" — and the agent autonomously searches for relevant reports and filings, parses them with LlamaParse, indexes them in Qdrant, and synthesizes a structured thesis with scored stock recommendations. Each thesis is a persistent chat session with one-to-many stock picks.
-
-Built as a **reliability-first** system: explicit state machine, structured outputs on every LLM call, graceful degradation when data sources fail, and real financial data grounding every score.
-
----
-
-## Quickstart
+## install
 
 ```bash
 git clone https://github.com/prateekjain98/basis.git
 cd basis
 
-# 1. Configure backend
-cp backend/.env.example backend/.env
-# Add OPENAI_API_KEY, LLAMA_CLOUD_API_KEY, SUPABASE_URL, SUPABASE_KEY
-
-# 2. Start Qdrant locally
-docker compose up -d qdrant
-
-# 3. Run backend
+# backend
 cd backend
+python3.13 -m venv .venv
 source .venv/bin/activate
-uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+pip install -r requirements.txt
 
-# 4. Run frontend (new terminal)
-cd frontend
-npm run dev
-
-# 5. Open http://localhost:3000
+# frontend
+cd ../frontend
+npm install
 ```
 
----
+Python 3.14 will not work. LlamaIndex C extensions fail on 3.14.
 
-## What It Does
-
-```
-User: "Investment thesis on AI infrastructure buildout"
-
-  Step 1: SEARCH    → Find recent PDF reports, 10-Ks, analyst notes
-  Step 2: FETCH     → Download top-3 relevant documents
-  Step 3: PARSE     → LlamaParse extracts tables, text, charts
-  Step 4: INDEX     → Chunk and embed into Qdrant (session-scoped)
-  Step 5: RETRIEVE  → Pull relevant passages for synthesis
-  Step 6: SYNTHESIZE→ LLM proposes 3-5 stocks with rationale
-  Step 7: SCORE     → Real financials + risk + momentum + liquidity
-  Step 8: PERSIST   → Thesis + stocks saved to Supabase
-
-Output:
-  ┌─────────────────────────────────────────────┐
-  │  THEME: AI Infrastructure Buildout          │
-  │  CONVICTION: HIGH                           │
-  │                                             │
-  │  NVDA — Score: 87/100                       │
-  │    Entry: $128.50 | Fundamentals: 92        │
-  │    Thematic Fit: 95 | Risk: 68 | Momentum: 88│
-  │    Rationale: Capex confirmation, 75% to AI │
-  │                                             │
-  │  VST — Score: 74/100                        │
-  │    Entry: $97.20  | Risk: 55 (rate exposure)│
-  │    Rationale: Power bottleneck = pricing pwr│
-  └─────────────────────────────────────────────┘
-```
-
----
-
-## Architecture
-
-```
-┌──────────────┐     ┌──────────────────────┐     ┌─────────────┐
-│   Next.js    │────▶│   FastAPI Backend    │────▶│   Qdrant    │
-│  (Chat UI)   │◀────│  LlamaParse + Index  │◀────│ (Vector DB) │
-│              │     │  Web Search + Fetch  │     └─────────────┘
-│  useChat     │     │  OpenAI Synthesis    │
-│  shadcn/ui   │     │  yfinance Scoring    │     ┌─────────────┐
-└──────────────┘     └──────────────────────┘────▶│  Supabase   │
-                                                  │  (Sessions, │
-                                                  │   Stocks,   │
-                                                  │   Docs)     │
-                                                  └─────────────┘
-```
-
-| Component | Purpose | Tech |
-|-----------|---------|------|
-| **Frontend** | Chat interface, streaming display | Next.js 15 + Vercel AI SDK UI + shadcn/ui |
-| **Orchestrator** | `search → fetch → parse → index → retrieve → score` | Python + FastAPI |
-| **Document Parser** | PDF tables, charts, multi-column layouts | LlamaParse (LlamaCloud) |
-| **Vector Store** | Semantic search over document chunks | Qdrant |
-| **Relational DB** | Sessions, stock recommendations, document metadata | Supabase (PostgreSQL) |
-| **Web Search** | Find relevant reports and filings | Tavily API + DuckDuckGo fallback |
-| **Financial Data** | Real-time prices, P/E, margins, growth | yfinance |
-| **Stock Scorer** | Weighted multi-factor scoring (fundamentals 30%, thematic 25%, risk 20%, momentum 15%, liquidity 10%) | Pydantic + yfinance |
-| **LLM** | Thesis synthesis, stock extraction, structured output | OpenAI GPT-4o-mini (configurable) |
-
-**Design choices:**
-- **Supabase over Convex** — Supabase gives us managed PostgreSQL with a REST API, auth, and generous free tier. Convex is JS-native; our Python backend needs a first-class Postgres client.
-- **Qdrant over pgvector** — Purpose-built vector DB with filterable HNSW, session-scoped collections, and better retrieval latency at scale.
-- **LlamaParse over PyMuPDF** — Industry-leading financial document parsing (tables, charts, footnotes). Critical for 10-Ks and investor decks.
-- **Agent finds documents itself** — No manual upload. The agent searches, downloads, and parses autonomously.
-
----
-
-## Project Structure
-
-```
-basis/
-├── README.md
-├── Makefile
-├── docker-compose.yml
-├── backend/
-│   ├── requirements.txt
-│   ├── .env.example
-│   ├── Dockerfile
-│   ├── schema.sql          # Supabase tables
-│   └── src/
-│       ├── main.py         # FastAPI app
-│       ├── config.py       # Pydantic settings
-│       ├── agent.py        # Orchestrator
-│       ├── db/
-│       │   └── supabase_client.py
-│       ├── models/
-│       │   └── schemas.py  # Pydantic types
-│       └── tools/
-│           ├── document_fetcher.py   # Search + download PDFs
-│           ├── document_parser.py    # LlamaParse wrapper
-│           ├── vector_store.py       # Qdrant session manager
-│           ├── stock_scorer.py       # Multi-factor scoring
-│           ├── web_search.py         # Tavily / DDG
-│           └── financial_data.py     # yfinance wrapper
-├── frontend/
-│   ├── package.json
-│   ├── .env.local
-│   ├── Dockerfile
-│   ├── app/
-│   │   ├── (chat)/
-│   │   │   ├── page.tsx
-│   │   │   ├── layout.tsx
-│   │   │   └── api/
-│   │   │       └── chat/
-│   │   │           └── route.ts      # Proxy to backend
-│   │   └── layout.tsx
-│   └── components/
-│       └── chat/
-│           └── shell.tsx             # Chat UI
-├── docs/
-│   ├── architecture.md     # ADR: framework, tool, design decisions
-│   ├── failure_modes.md    # Where the agent breaks and how to fix
-│   └── writeup.md          # Work trial write-up
-├── eval/
-│   ├── test_cases.json
-│   ├── run_eval.py
-│   └── metrics.py
-└── tests/
-    └── test_agent.py
-```
-
----
-
-## Deploy
-
-**Free tier stack:**
-
-| Layer | Service | Cost |
-|-------|---------|------|
-| Frontend | Vercel | Free |
-| Backend API | Fly.io | Free (3 VMs, 3GB) |
-| Vector DB | Qdrant Cloud | Free (1GB) |
-| Relational DB | Supabase | Free (500MB) |
+## configure
 
 ```bash
-# Deploy backend + Qdrant to Fly.io
-fly launch --dockerfile backend/Dockerfile
-fly deploy
+cp backend/.env.example backend/.env
+```
 
-# Deploy frontend to Vercel
+Required:
+
+| var | for |
+|-----|-----|
+| `OPENAI_API_KEY` | LLM + embeddings |
+| `SUPABASE_URL` | sessions, stocks, messages |
+| `SUPABASE_KEY` | sessions, stocks, messages |
+
+Optional:
+
+| var | for | fallback if missing |
+|-----|-----|---------------------|
+| `LLAMA_CLOUD_API_KEY` | PDF parsing | web snippets only |
+| `TAVILY_API_KEY` | web search | DuckDuckGo (worse results) |
+| `OPENAI_BASE_URL` | Groq, Together, etc | OpenAI default |
+
+No OpenAI key? Use OpenRouter (free models):
+
+```
+OPENAI_API_KEY=sk-or-v1-...
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+LLM_MODEL=meta-llama/llama-3.1-70b-instruct
+```
+
+## run
+
+```bash
+# 1. start qdrant
+docker compose up -d qdrant
+
+# 2. start backend (port 8000)
+cd backend
+source .venv/bin/activate
+uvicorn src.main:app --reload
+
+# 3. start frontend (port 3000)
+cd frontend
+npm run dev
+```
+
+Then open http://localhost:3000.
+
+## how it works
+
+`POST /chat` accepts `{messages, session_id}` and streams back a thesis.
+
+First turn:
+```
+search web → find 30 PDF candidates → score URLs → download top 15
+→ parse with LlamaParse → chunk → index in Qdrant
+→ retrieve top-8 passages → LLM synthesizes thesis
+→ score stocks with yfinance → save to Supabase
+```
+
+Follow-up:
+```
+reuse existing index → blend conversation history into retrieval query
+→ LLM adjusts thesis → save
+```
+
+## api
+
+| endpoint | method | what |
+|----------|--------|------|
+| `/chat` | POST | stream thesis. body: `{messages, session_id}` |
+| `/sessions` | GET | list all sessions |
+| `/sessions/{id}` | GET | session with stocks, docs, messages |
+| `/sessions/{id}` | DELETE | drop session + vectors |
+| `/health` | GET | ok |
+
+## project layout
+
+```
+backend/src/
+  agent.py              # pipeline: search → fetch → parse → index → retrieve → score
+  main.py               # FastAPI endpoints
+  tools/
+    document_fetcher.py # find 30 PDFs, return best 5
+    document_parser.py  # LlamaParse wrapper
+    vector_store.py     # Qdrant session manager
+    stock_scorer.py     # yfinance + 5-factor rubric
+    web_search.py       # Tavily / DDG
+frontend/app/(chat)/api/chat/route.ts   # proxy to backend
+```
+
+## test
+
+```bash
+cd backend
+source .venv/bin/activate
+pytest ../tests/test_agent.py -v
+```
+
+The vector store test is skipped without a real OpenAI key (embeddings).
+
+## known issues
+
+- **Needs real OpenAI key.** Dummy key in `.env` is a placeholder. LLM synthesis and embeddings both fail without it.
+- **yfinance rate-limits.** ~20 rapid ticker lookups and Yahoo starts returning 403s. Scores degrade to neutral 50s.
+- **DDG search is noisy.** ~30% of "PDF" links are HTML landing pages. The fetcher filters most out.
+- **Per-session Qdrant collections are wasteful.** 50 sessions = 50 collections. No auto-cleanup.
+- **Frontend is stripped template cruft.** Still has artifact code and AI Gateway references. Only the chat proxy works.
+
+## deploy
+
+Backend + Qdrant → Fly.io:
+```bash
+fly launch --dockerfile backend/Dockerfile
+```
+
+Frontend → Vercel:
+```bash
 vercel --prod
 ```
 
----
-
-## License
-
-MIT
+Costs $0 at rest on free tiers.

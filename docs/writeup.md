@@ -1,93 +1,75 @@
-# Work Trial Write-Up: Basis
+# work trial writeup
 
-## What I Built
+Built an agent that researches investment themes and returns scored stock recommendations. User types "AI infrastructure", agent finds real PDFs, reads them, returns a thesis with 3-5 stocks ranked 0-100.
 
-Basis is an autonomous investment research agent. You type a theme like "AI infrastructure" or "DeepSeek disruption" and it goes and finds real PDFs, reads them, and tells you which stocks to buy and why.
+## what it does
 
-The flow is:
-1. Search the web for recent investment reports (not just any web page — actual PDFs)
-2. Download the best ones using a scoring system that filters out blogspam and landing pages
-3. Parse them with LlamaParse to preserve tables and reading order
-4. Chunk and index in Qdrant for semantic search
-5. Retrieve relevant passages and synthesize a thesis via LLM
-6. Score 3-5 recommended stocks on a 5-factor rubric using real yfinance data
-7. Persist everything to Supabase so you can come back later and ask follow-up questions
+1. **Search** — 4 DDG queries to find ~30 PDF candidates
+2. **Score** — URL heuristics rank by domain trust, `.pdf` extension, year in path
+3. **Download** — top 15 candidates in parallel, 20s timeout per future
+4. **Parse** — LlamaParse → markdown (tables preserved). No key = skip
+5. **Index** — chunk + embed → Qdrant, one collection per session
+6. **Retrieve** — top-8 passages for the query
+7. **Synthesize** — LLM reads passages, returns JSON with stocks
+8. **Score** — yfinance fundamentals + 5-factor rubric
 
-Each thesis is a persistent chat session. Follow-up questions use the existing document corpus — the agent doesn't re-search the web, it just retrieves new passages relevant to your follow-up and adjusts the thesis.
+Follow-ups skip steps 1-4. Reuses existing corpus, blends conversation history into retrieval.
 
-## Decisions I Made
+## stack
 
-**Supabase over raw Postgres:** I started with SQLAlchemy + Alembic migrations. Spent an hour on schema versioning before realizing I was solving a problem I didn't have. Deleted all the ORM code and switched to Supabase. The Python client is sync, so I wrap DB calls in `asyncio.to_thread()`. It's not pretty but it means I never think about migrations.
+FastAPI + Pydantic backend. Supabase for sessions/stocks/docs/messages. Qdrant for vectors. LlamaIndex + LlamaParse for PDFs. yfinance for financial data. Next.js + Vercel AI SDK frontend.
 
-**Qdrant over pgvector:** pgvector works but filtered search gets slow past ~1M vectors. Qdrant is a single Docker container and HNSW is its default. I also liked that I could delete a whole session's vectors by dropping a collection.
+## what actually happened
 
-**LlamaParse over PyMuPDF:** I tried PyMuPDF first on a multi-column Goldman report. The text came out as a scrambled mix of left-column and right-column sentences. LlamaParse preserved the tables as markdown. It's the only parser I've found that handles financial PDFs well.
+**Day 1: frontend archaeology.** The starter template was the full Vercel AI Chatbot — AI Gateway, artifacts, auth, model selector, credit card alerts. Spent 4 hours stripping it. The proxy in `frontend/app/(chat)/api/chat/route.ts` is the only frontend code I wrote.
 
-**Plain Python over LangGraph:** LangGraph would give me a nice DAG and built-in retries. But my pipeline is a straight line: search → fetch → parse → index → retrieve → score. LangGraph would add 200 lines of abstraction for no benefit. If I ever add a second agent (e.g., a risk specialist that debates the main analyst), then LangGraph becomes worth it.
+**Day 2: backend.** Started with SQLAlchemy + Alembic. Wrote models, migrations, connection pooling. Spent an hour fighting migration versions before deleting all of it. Switched to Supabase. The Python client is sync-only, so every DB call is wrapped in `asyncio.to_thread()`.
 
-**Autonomous discovery over manual upload:** Manual upload is easy to build but useless in practice. Real analysts don't upload PDFs — they Google for the latest report. The hard part is filtering the search results. My first version found 3 PDFs and hoped for the best. The current version searches 4 different queries, scores 30+ candidates on domain authority and URL signals, and validates downloads before parsing.
+**Day 3: document discovery.** First `DocumentFetcher` ran one DDG query and downloaded the first 3 `.pdf` links. Most were HTML landing pages. Current version scores 30+ candidates, validates `Content-Type`, checks magic bytes, rejects <10KB files.
 
-## What Actually Broke
+## things that broke
 
-**1. The Vercel AI Chatbot template was a mess.**
-The initial frontend was the full Vercel template with AI Gateway, artifacts, auth pages, and a database dependency. It took me longer to strip it down to a simple proxy than it would have taken to build a chat UI from scratch. I kept the Vercel AI SDK for the streaming plumbing but removed everything else.
+**Python 3.14 killed LlamaIndex.** `pip install llama-index` exploded with a C extension build failure. Downgraded to 3.13. Lost 20 minutes.
 
-**2. Python 3.14 broke LlamaIndex.**
-I created the venv with Python 3.14 (the latest on my machine). `pip install llama-index` failed with a C extension compilation error. Downgraded to 3.13 and everything worked. This wasted ~20 minutes.
+**DDG returned ChatGPT's homepage as a "PDF."** Old `duckduckgo-search` package is deprecated. Switched to `ddgs`. Still noisy — without Tavily, 30% of candidates are blog posts.
 
-**3. DuckDuckGo search returned garbage.**
-My first web search implementation used `duckduckgo-search` (the old package name). It returned OpenAI's homepage and ChatGPT's login page as "search results" for "AI infrastructure investment report pdf." I switched to `ddgs` (the renamed package) and the results improved, but it's still hit-or-miss. Without a Tavily key, ~30% of "PDF" URLs are actually HTML landing pages.
+**ThreadPoolExecutor hung forever.** One URL accepted TCP, sent zero bytes. `future.result()` blocked. Added 20s timeout per future.
 
-**4. Parallel downloads hung forever.**
-I used `ThreadPoolExecutor` to download 15 candidate PDFs in parallel. One URL (a broken CDN) accepted the connection and then sent nothing. `future.result()` waited forever and the whole agent stalled. I added a 20-second timeout per future and a 120-second timeout on `as_completed()`.
+**GPT-4o-mini wraps JSON in markdown.** ~30% of runs. Current fix: `.removeprefix("```json")`. Hack.
 
-**5. GPT-4o-mini wrapped JSON in markdown fences.**
-About 1 in 3 test runs, the LLM returned:
-```json
-{"theme": "...", "stocks": [...]}
-```
-instead of raw JSON. `json.loads()` threw `JSONDecodeError`. I added stripping logic but I should probably switch to OpenAI's structured output API (`response_format={"type": "json_object"}`) for reliability.
+**yfinance throttled after 20 tickers.** Scores return `None`. Catch exceptions, return partial data. No fallback source.
 
-**6. yfinance rate-limited me.**
-After scoring ~20 stocks in rapid succession during testing, yfinance started returning 403s. I added exception handling so missing data doesn't crash the pipeline, but the scores become less useful when fundamentals are blank.
+**Follow-ups had no memory.** Original `/chat` only used `messages[-1]`. Added `messages` table, blended last 4 messages into retrieval query. Still noisy.
 
-**7. Follow-ups were completely broken.**
-The original `/chat` endpoint received the full `messages` array from the frontend but literally discarded everything except `messages[-1]`. So "what if GPU demand crashes?" was treated as a brand-new query with no memory. I added a `messages` table, loaded history on follow-up turns, and blended conversation context into the retrieval query.
+## current state
 
-## What I Would Do Next
+- Document discovery: works
+- Document parsing: works if LlamaParse key set
+- Vector indexing: needs real OpenAI key (embeddings)
+- Stock scoring: works, uses real yfinance data
+- LLM synthesis: **blocked — needs real API key**
+- Follow-ups: implemented, retrieval context is noisy
+- Frontend: stripped template, only chat proxy works
 
-1. **Structured outputs:** Use OpenAI's `response_format={"type": "json_object"}` instead of regex-stripping markdown fences. More reliable, less hacky.
+## blockers
 
-2. **Ticker validation:** Before calling yfinance, validate the ticker against a real database (e.g., NASDAQ's API). The LLM sometimes invents tickers that don't exist.
+OpenAI API key in `.env` is dummy. Everything up to the LLM call runs. Then dies at `chat.completions.create()`. Free alternatives: OpenRouter (signup, free models), Together AI ($5 credit), Ollama locally.
 
-3. **Citation layer:** Every stock claim should cite the specific document passage it came from. LlamaParse preserves page numbers in the metadata; I should surface them in the UI.
+## files
 
-4. **Single collection with filters:** Per-session Qdrant collections are wasteful. A single `document_chunks` collection with `session_id` in the payload would scale better.
+| file | what |
+|------|------|
+| `backend/src/agent.py` | whole pipeline, ~200 lines |
+| `backend/src/tools/document_fetcher.py` | finds 30 PDFs, returns best 5 |
+| `backend/src/tools/stock_scorer.py` | yfinance + rubric |
+| `backend/schema.sql` | Supabase table definitions (use migrations instead) |
+| `frontend/app/(chat)/api/chat/route.ts` | Vercel AI SDK → FastAPI proxy |
 
-5. **Better search:** Tavily is much better than DDG for finding institutional PDFs. Without a Tavily key the agent struggles to find high-quality sources.
-
-## How to Run
+## run
 
 ```bash
-cd backend
-source .venv/bin/activate
-uvicorn src.main:app --reload
+cd backend && source .venv/bin/activate && uvicorn src.main:app --reload
+cd frontend && npm run dev
 ```
 
-Frontend:
-```bash
-cd frontend
-npm run dev
-```
-
-Requires `OPENAI_API_KEY` in `backend/.env`. `LLAMA_CLOUD_API_KEY` and `TAVILY_API_KEY` are optional but improve quality significantly.
-
-## Deliverables
-
-| Deliverable | Status | Location |
-|-------------|--------|----------|
-| Working agent with ≥2 tools + session memory | Done | `backend/src/agent.py` |
-| Architecture decision doc | Done | `docs/architecture.md` |
-| Eval suite | Done | `eval/` |
-| Failure write-up | Done | `docs/failure_modes.md` |
-| Written doc | Done | `docs/writeup.md` |
+Needs `OPENAI_API_KEY`. `LLAMA_CLOUD_API_KEY` and `TAVILY_API_KEY` optional.
