@@ -24,7 +24,7 @@
 |--------|-----------------|
 | Flask | No native async; no auto-generated OpenAPI |
 | Django | Too heavy; ORM conflicts with Supabase |
-| LangChain | See ADR-6 |
+| LangChain | Fixed linear pipeline; no decision points; adds abstraction without capability |
 
 **Rationale:** The pipeline is I/O bound (web search, PDF download, LLM calls). FastAPI's async/await is essential. Pydantic gives runtime validation and auto-generated `/docs`.
 
@@ -89,23 +89,7 @@ messages             -- id, session_id, role, content
 
 ---
 
-## ADR-6: Orchestration — Plain Python, Not LangChain
-
-**Decision:** Do not use LangChain or LangGraph. Implement the pipeline in plain Python.
-
-**Rationale:**
-
-1. **Linear pipeline.** Our flow is fixed: `search → fetch → parse → index → retrieve → score`. There is no decision-making at each step. LangChain's ReAct loop adds complexity without capability.
-
-2. **Follow-ups are simple.** Session memory is 15 lines: load history, blend into retrieval query, call LLM. LangChain's `ConversationBufferMemory` wraps the same logic in 3 abstraction layers.
-
-3. **Debugging.** When the LLM wraps JSON in markdown fences, the fix is one line after `chat.completions.create()`. In LangChain, we'd dig through `JSONOutputParser` internals.
-
-**When LangGraph would be worth it:** If we added a second agent (e.g., a risk analyst that argues with the main researcher), then DAG state management becomes justified.
-
----
-
-## ADR-7: Financial Data — yfinance
+## ADR-6: Financial Data — yfinance
 
 **Decision:** Use yfinance for live stock fundamentals.
 
@@ -123,7 +107,7 @@ messages             -- id, session_id, role, content
 
 ---
 
-## ADR-8: Frontend — Next.js + Vercel AI SDK
+## ADR-7: Frontend — Next.js + Vercel AI SDK
 
 **Decision:** Use Next.js 16 with Vercel AI SDK for the chat UI.
 
@@ -143,7 +127,7 @@ messages             -- id, session_id, role, content
 
 ---
 
-## ADR-9: LLM Provider — Multi-provider
+## ADR-8: LLM Provider — Multi-provider
 
 **Decision:** Support OpenAI, Anthropic, and Vertex AI. All use the same `_llm_chat()` abstraction.
 
@@ -154,7 +138,7 @@ messages             -- id, session_id, role, content
 
 ---
 
-## ADR-10: Session Memory
+## ADR-9: Session Memory
 
 **Decision:** Dual-layer session memory.
 
