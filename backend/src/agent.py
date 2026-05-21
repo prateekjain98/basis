@@ -290,7 +290,23 @@ class Agent:
             raw_data["stocks"].append({"ticker": ticker, "total_score": total, **sr})
 
         print(f"[Agent] Pipeline complete in {time.time()-start_time:.1f}s")
-        text = self._format(parsed, scored)
+
+        # Validation & backtest
+        validation_md = ""
+        recommended_tickers = [s["ticker"] for s in scored]
+        if not scored:
+            validation_md += "\n**Note:** The research corpus does not explicitly mention specific stock tickers.\n\n"
+        if "aschenbrenner" in query.lower() or "situational awareness" in query.lower():
+            from src.tools.backtest import backtest_recommendations, print_backtest_report, validate_against_thesis
+            if recommended_tickers:
+                bt = backtest_recommendations(recommended_tickers)
+                validation_md += "\n" + print_backtest_report(bt) + "\n"
+            v = validate_against_thesis(recommended_tickers)
+            validation_md += f"\n**Aschenbrenner match rate:** {v['match_rate']*100:.0f}% ({len(v['matches'])}/{len(recommended_tickers)})\n"
+            if v["missed_holdings"]:
+                validation_md += f"\n**Holdings from 13F not captured:** {', '.join(v['missed_holdings'])}\n"
+
+        text = self._format(parsed, scored) + validation_md
         await asyncio.to_thread(
             self.db.table("messages").insert({
                 "session_id": session_id, "role": "assistant", "content": text
@@ -319,6 +335,9 @@ class Agent:
                 f"M:{s['momentum']} L:{s['liquidity']}"
             )
             lines.append(f"  - {s['rationale']}")
+            lines.append("")
+        if not stocks:
+            lines.append("*No specific stocks were identified in the research corpus.*")
             lines.append("")
         lines.append("---")
         lines.append("*Scores from real financial data + document analysis.*")
