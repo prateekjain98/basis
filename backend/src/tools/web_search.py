@@ -45,11 +45,11 @@ class WebSearchTool:
         import time
 
         last_error = None
-        for attempt in range(1, 4):
+        for attempt in range(1, 3):
             try:
                 from ddgs import DDGS
 
-                with DDGS() as ddgs:
+                with DDGS(timeout=15) as ddgs:
                     raw = list(ddgs.text(query, max_results=max_results))
                 return [
                     WebSearchResult(
@@ -62,8 +62,8 @@ class WebSearchTool:
                 ]
             except Exception as e:
                 last_error = e
-                print(f"[WebSearch] DDG attempt {attempt}/3 failed: {e}")
-                if attempt < 3:
-                    time.sleep(2 ** attempt)  # 2s, 4s backoff
-        print(f"[WebSearch] DDG all retries exhausted. Last error: {last_error}")
+                print(f"[WebSearch] DDG attempt {attempt}/2 failed: {str(e)[:120]}")
+                if attempt < 2:
+                    time.sleep(3)
+        print(f"[WebSearch] DDG all retries exhausted.")
         return []
