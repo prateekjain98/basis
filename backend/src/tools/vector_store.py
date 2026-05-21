@@ -1,11 +1,12 @@
-"""Qdrant vector store — one collection per session."""
+"""Vector store with Qdrant primary + in-memory fallback."""
 
 from __future__ import annotations
 
-from typing import List
+import hashlib
+from typing import List, Optional
 
-from llama_index.core import Document, StorageContext, VectorStoreIndex
-from llama_index.core.node_parser import SentenceSplitter
+from llama_index.core import Document, Settings, StorageContext, VectorStoreIndex
+from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.vector_stores.qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 
@@ -13,37 +14,107 @@ from src.config import settings
 
 
 class SessionVectorStore:
+    """Per-session vector index. Falls back to in-memory if Qdrant unavailable."""
+
     def __init__(self) -> None:
-        self.client = QdrantClient(url=settings.qdrant_url)
+        self._qdrant: Optional[QdrantClient] = None
+        self._fallback: dict[str, list[str]] = {}
+        self._init_qdrant()
+
+    def _init_qdrant(self) -> None:
+        if not settings.qdrant_url:
+            return
+        try:
+            kwargs = {"url": settings.qdrant_url, "timeout": 10}
+            if settings.qdrant_api_key:
+                kwargs["api_key"] = settings.qdrant_api_key
+            self._qdrant = QdrantClient(**kwargs)
+            self._qdrant.get_collections()
+        except Exception as e:
+            print(f"[VectorStore] Qdrant unavailable ({e}), using in-memory fallback")
+            self._qdrant = None
 
     def index_documents(self, session_id: str, texts: List[str]) -> int:
-        collection = f"session_{session_id}"
-        self.client.delete_collection(collection)
-
-        store = QdrantVectorStore(
-            client=self.client,
-            collection_name=collection,
-            dimension=1536,
-        )
-        ctx = StorageContext.from_defaults(vector_store=store)
-        docs = [Document(text=t) for t in texts if t.strip()]
-        if not docs:
+        if not texts:
             return 0
 
-        nodes = SentenceSplitter(chunk_size=512, chunk_overlap=64).get_nodes_from_documents(docs)
-        VectorStoreIndex(nodes, storage_context=ctx)
-        return len(nodes)
+        if self._qdrant is not None:
+            try:
+                return self._index_qdrant(session_id, texts)
+            except Exception as e:
+                print(f"[VectorStore] Qdrant index failed ({e}), falling back to memory")
+
+        # In-memory fallback: just store raw text chunks
+        chunks = []
+        for t in texts:
+            # Simple chunking: split into ~500 char chunks
+            for i in range(0, len(t), 500):
+                chunk = t[i:i + 500].strip()
+                if chunk:
+                    chunks.append(chunk)
+        self._fallback[session_id] = chunks
+        return len(chunks)
+
+    def _index_qdrant(self, session_id: str, texts: List[str]) -> int:
+        embed_model = OpenAIEmbedding(
+            api_key=settings.openai_api_key or "dummy",
+            api_base=settings.openai_base_url,
+            model="text-embedding-3-small",
+        )
+        Settings.embed_model = embed_model
+
+        vector_store = QdrantVectorStore(
+            client=self._qdrant,
+            collection_name=f"session_{session_id}",
+        )
+        storage_context = StorageContext.from_defaults(vector_store=vector_store)
+
+        documents = [Document(text=t) for t in texts]
+        VectorStoreIndex.from_documents(documents, storage_context=storage_context)
+        return len(documents)
 
     def query(self, session_id: str, query: str, top_k: int = 5) -> List[str]:
-        collection = f"session_{session_id}"
-        if not self.client.collection_exists(collection):
+        if self._qdrant is not None:
+            try:
+                return self._query_qdrant(session_id, query, top_k)
+            except Exception as e:
+                print(f"[VectorStore] Qdrant query failed ({e}), falling back to memory")
+
+        # In-memory fallback: simple keyword matching
+        chunks = self._fallback.get(session_id, [])
+        if not chunks:
             return []
 
-        store = QdrantVectorStore(client=self.client, collection_name=collection)
-        index = VectorStoreIndex.from_vector_store(store)
-        return [n.text for n in index.as_retriever(similarity_top_k=top_k).retrieve(query)]
+        query_words = set(query.lower().split())
+        scored = []
+        for c in chunks:
+            score = sum(1 for w in query_words if w in c.lower())
+            scored.append((score, c))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [c for _, c in scored[:top_k]]
+
+    def _query_qdrant(self, session_id: str, query: str, top_k: int) -> List[str]:
+        embed_model = OpenAIEmbedding(
+            api_key=settings.openai_api_key or "dummy",
+            api_base=settings.openai_base_url,
+            model="text-embedding-3-small",
+        )
+        Settings.embed_model = embed_model
+
+        vector_store = QdrantVectorStore(
+            client=self._qdrant,
+            collection_name=f"session_{session_id}",
+        )
+        storage_context = StorageContext.from_defaults(vector_store=vector_store)
+        index = VectorStoreIndex([], storage_context=storage_context)
+        retriever = index.as_retriever(similarity_top_k=top_k)
+        nodes = retriever.retrieve(query)
+        return [n.text for n in nodes]
 
     def delete_session(self, session_id: str) -> None:
-        collection = f"session_{session_id}"
-        if self.client.collection_exists(collection):
-            self.client.delete_collection(collection)
+        if self._qdrant is not None:
+            try:
+                self._qdrant.delete_collection(f"session_{session_id}")
+            except Exception:
+                pass
+        self._fallback.pop(session_id, None)

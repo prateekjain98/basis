@@ -15,6 +15,56 @@ from typing import AsyncIterator, List, Optional
 from openai import AsyncOpenAI
 
 from src.config import settings
+
+
+def _get_llm_client():
+    if settings.vertex_project:
+        return "vertex"
+    if settings.anthropic_api_key:
+        from anthropic import AsyncAnthropic
+        return AsyncAnthropic(api_key=settings.anthropic_api_key)
+    return AsyncOpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url)
+
+
+async def _llm_chat(client, messages, model, temperature, max_tokens):
+    if isinstance(client, AsyncOpenAI):
+        resp = await client.chat.completions.create(
+            model=model, messages=messages, temperature=temperature, max_tokens=max_tokens,
+            response_format={"type": "json_object"},
+        )
+        return resp.choices[0].message.content or "{}"
+    if client == "vertex":
+        from google import genai
+        from google.genai import types
+        gemini = genai.Client(vertexai=True, project=settings.vertex_project, location=settings.vertex_location or "us-central1")
+        system_msg = ""
+        user_msgs = []
+        for m in messages:
+            if m["role"] == "system":
+                system_msg = m["content"]
+            elif m["role"] == "user":
+                user_msgs.append(types.Content(role="user", parts=[types.Part(text=m["content"])]))
+            elif m["role"] == "assistant":
+                user_msgs.append(types.Content(role="model", parts=[types.Part(text=m["content"])]))
+        config = types.GenerateContentConfig(system_instruction=system_msg, temperature=temperature, max_output_tokens=max_tokens)
+        resp = gemini.models.generate_content(model=model, contents=user_msgs, config=config)
+        return resp.text or "{}"
+    # Anthropic
+    system_msg = ""
+    user_msgs = []
+    for m in messages:
+        if m["role"] == "system":
+            system_msg = m["content"]
+        else:
+            user_msgs.append({"role": m["role"], "content": m["content"]})
+    resp = await client.messages.create(
+        model=model,
+        system=system_msg,
+        messages=user_msgs,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    return resp.content[0].text if resp.content else "{}"
 from src.db.supabase_client import get_supabase
 from src.tools.document_fetcher import DocumentFetcher
 from src.tools.document_parser import DocumentParser
@@ -30,8 +80,13 @@ class Agent:
         self.vector_store = SessionVectorStore()
         self.scorer = StockScorer()
         self.web_search = WebSearchTool()
-        self.client = AsyncOpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url)
-        self.model = settings.llm_model
+        self.client = _get_llm_client()
+        if settings.vertex_project:
+            self.model = settings.vertex_model or "gemini-2.0-flash-001"
+        elif settings.anthropic_api_key:
+            self.model = settings.anthropic_model
+        else:
+            self.model = settings.llm_model
         self.db = get_supabase()
 
     async def run(
@@ -151,10 +206,7 @@ class Agent:
         })
 
         try:
-            resp = await self.client.chat.completions.create(
-                model=self.model, messages=messages, temperature=0.3, max_tokens=2000
-            )
-            raw = resp.choices[0].message.content or "{}"
+            raw = await _llm_chat(self.client, messages, self.model, temperature=0.3, max_tokens=2000)
             raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             parsed = json.loads(raw)
         except Exception as e:

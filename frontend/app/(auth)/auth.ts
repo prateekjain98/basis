@@ -11,5 +11,5 @@ export const auth = async () => {
   };
 };
 
-export const signIn = async () => ({ error: null });
-export const signOut = async () => {};
+export const signIn = async (_provider?: string, _options?: any) => ({ error: null });
+export const signOut = async (_options?: any) => {};

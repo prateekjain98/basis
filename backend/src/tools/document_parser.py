@@ -1,10 +1,8 @@
-"""LlamaParse wrapper. Falls back to None if no API key."""
+"""Document parser with LlamaParse primary + PyMuPDF fallback."""
 
 from __future__ import annotations
 
 from typing import Optional
-
-from llama_parse import LlamaParse
 
 from src.config import settings
 
@@ -12,14 +10,39 @@ from src.config import settings
 class DocumentParser:
     def __init__(self) -> None:
         key = settings.llama_cloud_api_key
-        self.parser = LlamaParse(api_key=key, result_type="markdown") if key else None
+        self._llama = None
+        if key:
+            try:
+                from llama_parse import LlamaParse
+                self._llama = LlamaParse(api_key=key, result_type="markdown")
+            except Exception as e:
+                print(f"[DocumentParser] LlamaParse init failed: {e}")
 
     def parse(self, file_path: str) -> Optional[str]:
-        if self.parser is None:
-            return None
+        # Try LlamaParse first if available
+        if self._llama is not None:
+            try:
+                docs = self._llama.load_data(file_path)
+                text = "\n\n".join(d.text for d in docs if d.text)
+                if text and len(text.strip()) > 100:
+                    return text
+            except Exception as e:
+                print(f"[DocumentParser] LlamaParse failed: {e}")
+
+        # Fallback to PyMuPDF
         try:
-            docs = self.parser.load_data(file_path)
-            return "\n\n".join(d.text for d in docs if d.text)
+            import fitz  # PyMuPDF
+            doc = fitz.open(file_path)
+            parts = []
+            for page in doc:
+                txt = page.get_text()
+                if txt.strip():
+                    parts.append(txt)
+            doc.close()
+            text = "\n\n".join(parts)
+            if text and len(text.strip()) > 100:
+                return text
         except Exception as e:
-            print(f"[DocumentParser] failed: {e}")
-            return None
+            print(f"[DocumentParser] PyMuPDF failed: {e}")
+
+        return None
