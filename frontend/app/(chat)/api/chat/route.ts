@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
 
-// NOTE: In-memory map won't persist across serverless invocations.
-// We persist via a client-side cookie set by the backend response.
+// In-memory mapping from frontend chatId to backend sessionId
 const chatToSession = new Map<string, string>();
 
 export async function POST(request: Request) {
@@ -76,7 +75,7 @@ export async function POST(request: Request) {
 
         // Extract session ID from first chunk if this is a new chat
         if (!sessionIdCaptured && chatId && !sessionId) {
-          const match = chunk.match(/\*\*Thesis ID:\*\* `([a-f0-9]+)`/);
+          const match = chunk.match(/\*\*Session:\*\* `([a-z0-9]+)`/);
           if (match) {
             chatToSession.set(chatId, match[1]);
             sessionIdCaptured = true;
