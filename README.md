@@ -34,7 +34,7 @@ State a thesis → discover documents → synthesize a thesis → score trades �
 - [Eval Suite](#-eval-suite)
 - [Deployment](#-deployment)
 - [Environment](#-environment)
-- [Current State](#-current-state)
+- [Tests](#-tests)
 - [License](#-license)
 
 </details>
@@ -232,30 +232,81 @@ if is_followup and len(history) >= 2:
 
 ## 📊 Eval Suite
 
-`eval/run_eval.py` runs 8 test cases against the live backend:
+`eval/run_eval.py` runs 8 end-to-end test cases against the live backend. Each test sends a real user query through the full pipeline and scores the output on three dimensions from the brief.
 
-| ID | Test | What it validates |
-|----|------|-------------------|
-| tc-01 | Simple ticker query | Basic tool use + financial data |
-| tc-02 | Thematic without ticker | Document discovery path |
-| tc-03 | Follow-up in session | Session memory recall |
-| tc-04 | Ambiguous prompt | Graceful degradation |
-| tc-05 | Bad ticker | Tool failure handling |
-| tc-06 | International market | Non-US ticker support |
-| tc-07 | Multi-turn memory | Comparison across history |
-| tc-08 | No search results | Empty corpus handling |
+### Test Cases
 
-**Metrics:**
-- **Task completion**: Thesis structure checks (has_theme, has_rationale, has_risks, has_conviction)
-- **Hallucination detection**: Extract numbers from thesis, verify against raw tool output
-- **Graceful failure**: Acknowledges ambiguity, acknowledges data gaps, still generates thesis
+| ID | Test | Prompt | What it validates |
+|----|------|--------|-------------------|
+| tc-01 | Simple ticker query | `"Thesis on NVDA"` | Basic tool use: financial data + web search |
+| tc-02 | Thematic without ticker | `"Investment thesis on AI infrastructure buildout"` | Document discovery path |
+| tc-03 | Follow-up in session | `"What are the key risks?"` (after NVDA thesis) | Session memory recall |
+| tc-04 | Ambiguous prompt | `"Is this a good buy?"` | Graceful degradation |
+| tc-05 | Bad ticker | `"Thesis on XYZFAKE123"` | Tool failure handling |
+| tc-06 | International market | `"Thesis on Reliance Industries"` | Non-US ticker support |
+| tc-07 | Multi-turn memory | `"Compare that to AMD"` (after NVDA thesis) | Comparison across history |
+| tc-08 | No search results | `"Thesis on a very obscure private company"` | Empty corpus handling |
+
+### Metrics
+
+**1. Task completion rate**
+
+Automated structure checks on the thesis output:
+- `has_thesis` — Contains a theme header or investment statement
+- `has_rationale` — Contains bull case or rationale section
+- `has_risks` — Contains risk or bear case section
+- `has_conviction` — Contains conviction level (High/Medium/Low)
+- `thesis_still_generated` — Output length > 200 chars even on failure
+
+**2. Hallucination on tool outputs**
+
+`check_grounding()` extracts all `$X`, `X%`, and decimal numbers from the thesis and verifies they appear in the raw tool output. Allows 1 unmatched number (could be LLM knowledge or rounding). This catches fabricated financials.
+
+**3. Graceful failure handling**
+
+- `graceful_degradation` — Acknowledges uncertainty or gaps
+- `acknowledges_ambiguity` — Detects vague prompts and asks for clarification
+- `acknowledges_data_gap` — States when data is missing rather than hallucinating
+- `no_hallucinated_financials` — No fabricated numbers when tools return empty
+
+### Running evals
+
+```bash
+cd eval
+python run_eval.py
+```
+
+Requires `BACKEND_URL` (defaults to `http://localhost:8000`) and a working LLM provider.
+
+Output:
+```
+Results: 6/8 passed (75%)
+Average score: 82%
+Average duration: 12400ms
+```
+
+A JSON report is written to `eval/outputs/eval_{timestamp}.json`.
+
+See [`docs/evaluation.md`](./docs/evaluation.md) for full details.
+
+## 🧪 Tests
+
+`tests/test_agent.py` tests tool reliability without requiring a live LLM:
+
+| Test | What it checks |
+|---|---|
+| `test_web_search_returns_results` | Web search returns a list |
+| `test_web_search_graceful_on_total_failure` | No crash on nonsense query |
+| `test_stock_scorer_returns_partial_on_failure` | Fake ticker returns `None` fields, not exception |
+| `test_stock_scorer_populates_known_ticker` | AAPL returns real data from yfinance |
+| `test_vector_store_lifecycle` | Index → query → delete works end-to-end |
+| `test_document_fetcher_finds_pdfs` | Finds, scores, downloads real PDFs |
+| `test_document_fetcher_scoring` | Scoring logic produces monotonic rankings |
 
 Run:
 ```bash
-cd eval && python run_eval.py
+cd backend && pytest ../tests/test_agent.py -v
 ```
-
-See [`docs/evaluation.md`](./docs/evaluation.md) for full details.
 
 ## 🚀 Deployment
 
