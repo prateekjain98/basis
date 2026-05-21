@@ -57,7 +57,12 @@ export const slashCommands: SlashCommand[] = [
     icon: <XIcon className="size-3.5" />,
     action: "delete",
   },
-
+  {
+    name: "purge",
+    description: "Delete all chats",
+    icon: <BombIcon className="size-3.5" />,
+    action: "purge",
+  },
 ];
 
 type SlashCommandMenuProps = {

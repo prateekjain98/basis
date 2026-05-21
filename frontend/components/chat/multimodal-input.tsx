@@ -190,7 +190,19 @@ function PureMultimodalInput({
           },
         });
         break;
-
+      case "purge":
+        toast("Delete all chats?", {
+          action: {
+            label: "Delete all",
+            onClick: () => {
+              fetch(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/history`, {
+                method: "DELETE",
+              });
+              router.push("/");
+              toast.success("All chats deleted");
+            },
+          },
+        });
         break;
       default:
         break;
@@ -631,13 +643,13 @@ function PureModelSelectorCompact({
   const capabilities: Record<string, ModelCapabilities> | undefined =
     modelsData?.capabilities ?? modelsData;
   const dynamicModels: ChatModel[] | undefined = modelsData?.models;
-  const activeModels = dynamicModels ?? chatModels;
+  const activeModels = dynamicModels?.length ? dynamicModels : chatModels;
 
   const selectedModel =
     activeModels.find((m: ChatModel) => m.id === selectedModelId) ??
     activeModels.find((m: ChatModel) => m.id === DEFAULT_CHAT_MODEL) ??
     activeModels[0];
-  const [provider] = selectedModel.id.split("/");
+  const [provider] = selectedModel?.id.split("/") ?? [""];
 
   return (
     <ModelSelector onOpenChange={setOpen} open={open}>
