@@ -58,8 +58,10 @@ export async function createChat({
   userId: string;
   visibility?: VisibilityType;
 }) {
+  // Ensure user exists before creating chat (FK constraint).
+  // Wrap user creation in its own try/catch so a race with ensureUser()
+  // doesn't prevent us from saving the chat.
   try {
-    // Ensure user exists before creating chat (FK constraint)
     const existing = await getUserById(userId);
     if (!existing) {
       const session = await auth();
@@ -67,6 +69,11 @@ export async function createChat({
         await createUser(session.user.email, "demo-password", userId);
       }
     }
+  } catch (err) {
+    console.warn("[createChat] User creation/lookup error (ignoring):", err);
+  }
+
+  try {
     return await saveChat({
       id,
       title,
@@ -75,7 +82,7 @@ export async function createChat({
       createdAt: new Date().toISOString(),
     });
   } catch (err) {
-    console.warn("[createChat] Supabase error, returning mock chat:", err);
+    console.warn("[createChat] saveChat error, returning mock chat:", err);
     return {
       id,
       title,

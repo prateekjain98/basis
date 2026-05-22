@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
     return Response.json(chats);
   } catch (err: any) {
     console.warn("[API /history] Supabase error, returning empty:", err);
-    return Response.json([]);
+    return Response.json({ chats: [], hasMore: false });
   }
 }
 
