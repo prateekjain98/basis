@@ -181,7 +181,7 @@ class Agent:
             retrieval_query = " | ".join(f"{m['role']}: {m['content'][:100]}" for m in recent)
             retrieval_query += f" | now: {query}"
 
-        chunks = await asyncio.to_thread(self.vector_store.query, session_id, retrieval_query, top_k=8)
+        chunks = await asyncio.to_thread(self.vector_store.query, session_id, retrieval_query, top_k=12)
         print(f"[Agent] Retrieved {len(chunks)} chunks")
         raw_data["chunks"] = chunks[:4]
         if not chunks:
@@ -203,7 +203,7 @@ class Agent:
             "extract key investment themes, and map each theme to specific public companies.\n\n"
             "STEP-BY-STEP PROCESS — you MUST follow these steps:\n"
             "1. List the KEY BOTTLENECKS or themes described in the research context.\n"
-            "2. For EACH bottleneck, name 2-3 PUBLIC COMPANIES that are pure-plays or major beneficiaries.\n"
+            "2. For EACH bottleneck, name 3-5 PUBLIC COMPANIES that are pure-plays or major beneficiaries. Aim for 5-7 total stocks.\n"
             "3. Explain the logical connection for each: 'Thesis says X → Company Y does Z → Y benefits.'\n"
             "4. AVOID generic giants (AAPL, GOOGL, MSFT, AMZN, META, TSLA). Prefer pure-plays.\n\n"
             "Return ONLY valid JSON:\n"
@@ -223,7 +223,7 @@ class Agent:
         })
 
         try:
-            raw = await _llm_chat(self.client, messages, self.model, temperature=0.3, max_tokens=2000)
+            raw = await _llm_chat(self.client, messages, self.model, temperature=0.3, max_tokens=3000)
             # Extract JSON from markdown fences or plain text preamble
             json_match = re.search(r'```json\s*(\{.*\})\s*```', raw, re.DOTALL)
             if json_match:
