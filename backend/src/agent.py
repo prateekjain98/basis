@@ -109,6 +109,9 @@ class Agent:
         existing_docs = []
         raw_data: dict = {"query": query, "documents": [], "chunks": [], "stocks": []}
 
+        # Total pipeline timeout: if we exceed this, return partial results
+        PIPELINE_TIMEOUT = 75.0
+
         # --- Load or create session -----------------------------------------
         try:
             if session_id:
@@ -143,10 +146,18 @@ class Agent:
         yield f"**Thesis ID:** `{session_id}`\n\n"
 
         # --- First turn: discover documents ---------------------------------
+        docs = []
         if not is_followup or not existing_docs:
             yield "**Searching** for reports...\n\n"
             t0 = time.time()
-            docs = await asyncio.to_thread(self.fetcher.find_and_download, query, top_n=5)
+            try:
+                docs = await asyncio.wait_for(
+                    asyncio.to_thread(self.fetcher.find_and_download, query, top_n=5),
+                    timeout=35.0,
+                )
+            except asyncio.TimeoutError:
+                print(f"[Agent] Discovery timed out after 35s, proceeding with web snippets")
+                yield "Document search timed out. Using web snippets.\n\n"
             print(f"[Agent] Discovery took {time.time()-t0:.1f}s, found {len(docs)} docs")
 
             if not docs:
@@ -350,7 +361,11 @@ class Agent:
             scored.append(res)
             raw_data["stocks"].append({"ticker": ticker, "total_score": res["total"], **sr})
 
-        print(f"[Agent] Pipeline complete in {time.time()-start_time:.1f}s")
+        elapsed = time.time() - start_time
+        print(f"[Agent] Pipeline complete in {elapsed:.1f}s")
+
+        if elapsed > PIPELINE_TIMEOUT:
+            print(f"[Agent] WARNING: Pipeline exceeded {PIPELINE_TIMEOUT}s timeout")
 
         text = self._format(parsed, scored)
         try:

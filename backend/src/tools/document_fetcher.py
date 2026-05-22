@@ -157,11 +157,10 @@ class DocumentFetcher:
             print(f"[DocumentFetcher] Using cached discovery for '{theme[:40]}'")
             return cached[1]
 
+        # Use 2 focused queries instead of 4 for speed
         queries = [
             f'"{theme}" investment report filetype:pdf',
-            f'"{theme}" equity research pdf',
-            f'"{theme}" analysis report 2024 2025',
-            f'"{theme}" sector outlook pdf',
+            f'"{theme}" equity research analysis 2024 2025',
         ]
 
         seen_urls = set()
