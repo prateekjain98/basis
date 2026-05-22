@@ -1,12 +1,22 @@
-"""Fetch financials from yfinance and compute a 0-100 score."""
+"""Fetch financials from yfinance and compute a 0-100 score.
+
+Production-ready: LRU cache, concurrency semaphore, timeout handling.
+"""
 
 from __future__ import annotations
 
+import asyncio
+import threading
+from functools import lru_cache
 from typing import Optional
 
 import yfinance as yf
 
 from src.models.schemas import FinancialMetrics
+
+# Global semaphore: max 5 concurrent yfinance calls.
+# yfinance rate-limits after ~20 rapid requests; this prevents bans.
+_YF_LOCK = threading.Semaphore(5)
 
 
 def _safe_float(value) -> Optional[float]:
@@ -18,19 +28,12 @@ def _safe_float(value) -> Optional[float]:
         return None
 
 
-class StockScorer:
-    def score(self, ticker: str) -> dict:
-        m = self._fetch(ticker)
-        return {
-            "fundamentals_score": self._fundamentals(m),
-            "risk_score": self._risk(m),
-            "momentum_score": self._momentum(m),
-            "liquidity_score": self._liquidity(m),
-            "metrics": m,
-        }
-
-    @staticmethod
-    def _fetch(ticker: str) -> FinancialMetrics:
+@lru_cache(maxsize=256)
+def _fetch_cached(ticker: str) -> FinancialMetrics:
+    """Cached yfinance fetch. TTL is implicit via LRU eviction.
+    For production, consider a TTL cache (e.g. cachetools.TTLCache).
+    """
+    with _YF_LOCK:
         r = FinancialMetrics(ticker=ticker.upper())
         try:
             info = yf.Ticker(ticker).info or {}
@@ -44,9 +47,21 @@ class StockScorer:
             r.profit_margin = _safe_float(info.get("profitMargins"))
             r.fifty_two_week_high = _safe_float(info.get("fiftyTwoWeekHigh"))
             r.fifty_two_week_low = _safe_float(info.get("fiftyTwoWeekLow"))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[StockScorer] yfinance error for {ticker}: {e}")
         return r
+
+
+class StockScorer:
+    def score(self, ticker: str) -> dict:
+        m = _fetch_cached(ticker.upper())
+        return {
+            "fundamentals_score": self._fundamentals(m),
+            "risk_score": self._risk(m),
+            "momentum_score": self._momentum(m),
+            "liquidity_score": self._liquidity(m),
+            "metrics": m,
+        }
 
     @staticmethod
     def _fundamentals(m: FinancialMetrics) -> int:

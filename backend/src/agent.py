@@ -28,11 +28,15 @@ def _get_llm_client():
     return AsyncOpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url)
 
 
-async def _llm_chat(client, messages, model, temperature, max_tokens):
+async def _llm_chat(client, messages, model, temperature, max_tokens, timeout_sec: float = 60.0):
+    """Call LLM with timeout. Raises asyncio.TimeoutError if exceeded."""
     if isinstance(client, AsyncOpenAI):
-        resp = await client.chat.completions.create(
-            model=model, messages=messages, temperature=temperature, max_tokens=max_tokens,
-            response_format={"type": "json_object"},
+        resp = await asyncio.wait_for(
+            client.chat.completions.create(
+                model=model, messages=messages, temperature=temperature, max_tokens=max_tokens,
+                response_format={"type": "json_object"},
+            ),
+            timeout=timeout_sec,
         )
         return resp.choices[0].message.content or "{}"
     if client == "vertex":
@@ -59,12 +63,15 @@ async def _llm_chat(client, messages, model, temperature, max_tokens):
             system_msg = m["content"]
         else:
             user_msgs.append({"role": m["role"], "content": m["content"]})
-    resp = await client.messages.create(
-        model=model,
-        system=system_msg,
-        messages=user_msgs,
-        temperature=temperature,
-        max_tokens=max_tokens,
+    resp = await asyncio.wait_for(
+        client.messages.create(
+            model=model,
+            system=system_msg,
+            messages=user_msgs,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        ),
+        timeout=timeout_sec,
     )
     return resp.content[0].text if resp.content else "{}"
 from src.db.supabase_client import get_supabase
@@ -271,24 +278,30 @@ class Agent:
         if len(stocks) < 3 or llm_tickers.issubset(GENERIC_TICKERS):
             theme = parsed.get("theme", query)
             yield f"**Deep research** mapping '{theme}' to specific companies...\n\n"
-            mapped = self.theme_mapper.map_themes([theme], max_results_per_theme=5)
-            print(f"[Agent] ThemeMapper returned {len(mapped)} tickers: {[m['ticker'] for m in mapped]}")
-            for m in mapped:
-                if m["ticker"] not in llm_tickers:
-                    stocks.append({
-                        "ticker": m["ticker"],
-                        "name": m["ticker"],
-                        "rationale": f"Mapped from theme: {m['theme']}",
-                        "thematic_fit_score": 75,
-                    })
+            try:
+                mapped = await asyncio.to_thread(
+                    self.theme_mapper.map_themes, [theme], max_results_per_theme=5
+                )
+                print(f"[Agent] ThemeMapper returned {len(mapped)} tickers: {[m['ticker'] for m in mapped]}")
+                for m in mapped:
+                    if m["ticker"] not in llm_tickers:
+                        stocks.append({
+                            "ticker": m["ticker"],
+                            "name": m["ticker"],
+                            "rationale": f"Mapped from theme: {m['theme']}",
+                            "thematic_fit_score": 75,
+                        })
+            except Exception as e:
+                print(f"[Agent] ThemeMapper error: {e}")
 
         print(f"[Agent] Scoring {len(stocks)} stocks")
         scored = []
-        for s in stocks:
+
+        # Score stocks in parallel for speed
+        async def _score_one(s: dict) -> dict:
             ticker = s.get("ticker", "")
             if not ticker:
-                continue
-            yield f"**Scoring** {ticker}...\n"
+                return None
             sr = await asyncio.to_thread(self.scorer.score, ticker)
             m = sr["metrics"]
             fit = s.get("thematic_fit_score", 50)
@@ -296,31 +309,46 @@ class Agent:
                 sr["fundamentals_score"] * 0.30 + fit * 0.25 + sr["risk_score"] * 0.20
                 + sr["momentum_score"] * 0.15 + sr["liquidity_score"] * 0.10, 1
             )
+            return {
+                "ticker": ticker, "name": s.get("name", ticker), "rationale": s.get("rationale", ""),
+                "entry": m.current_price, "fundamentals": sr["fundamentals_score"],
+                "thematic_fit": fit, "risk": sr["risk_score"], "momentum": sr["momentum_score"],
+                "liquidity": sr["liquidity_score"], "total": total,
+                "_sr": sr, "_fit": fit,
+            }
+
+        score_tasks = [_score_one(s) for s in stocks if s.get("ticker")]
+        score_results = await asyncio.gather(*score_tasks, return_exceptions=True)
+
+        for res in score_results:
+            if isinstance(res, Exception):
+                print(f"[Agent] Stock scoring error: {res}")
+                continue
+            if res is None:
+                continue
+            ticker = res["ticker"]
+            sr = res.pop("_sr")
+            fit = res.pop("_fit")
             try:
                 await asyncio.to_thread(
                     self.db.table("stock_recommendations").insert({
                         "thesis_id": session_id,
                         "ticker": ticker,
-                        "name": s.get("name"),
-                        "entry_price": m.current_price,
-                        "fundamentals_score": sr["fundamentals_score"],
+                        "name": res["name"],
+                        "entry_price": res["entry"],
+                        "fundamentals_score": res["fundamentals"],
                         "thematic_fit_score": fit,
-                        "risk_score": sr["risk_score"],
-                        "momentum_score": sr["momentum_score"],
-                        "liquidity_score": sr["liquidity_score"],
-                        "total_score": total,
-                        "rationale": s.get("rationale"),
+                        "risk_score": res["risk"],
+                        "momentum_score": res["momentum"],
+                        "liquidity_score": res["liquidity"],
+                        "total_score": res["total"],
+                        "rationale": res["rationale"],
                     }).execute
                 )
             except Exception as e:
                 print(f"[Agent] DB error saving stock {ticker}: {e}")
-            scored.append({
-                "ticker": ticker, "name": s.get("name", ticker), "rationale": s.get("rationale", ""),
-                "entry": m.current_price, "fundamentals": sr["fundamentals_score"],
-                "thematic_fit": fit, "risk": sr["risk_score"], "momentum": sr["momentum_score"],
-                "liquidity": sr["liquidity_score"], "total": total,
-            })
-            raw_data["stocks"].append({"ticker": ticker, "total_score": total, **sr})
+            scored.append(res)
+            raw_data["stocks"].append({"ticker": ticker, "total_score": res["total"], **sr})
 
         print(f"[Agent] Pipeline complete in {time.time()-start_time:.1f}s")
 

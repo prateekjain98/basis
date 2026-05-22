@@ -1,9 +1,13 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { updateSession } from "@/utils/supabase/middleware";
 
 const PASSWORD_COOKIE = "basis_auth";
 const HARDCODED_PASSWORD = "basis";
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
+  // Refresh Supabase session first
+  const response = await updateSession(request);
+
   const { pathname } = request.nextUrl;
 
   // Allow static assets and API auth routes
@@ -13,17 +17,17 @@ export function middleware(request: NextRequest) {
     pathname === "/favicon.ico" ||
     pathname === "/login"
   ) {
-    return NextResponse.next();
+    return response;
   }
 
   const cookie = request.cookies.get(PASSWORD_COOKIE);
   if (cookie?.value === HARDCODED_PASSWORD) {
-    return NextResponse.next();
+    return response;
   }
 
   return NextResponse.redirect(new URL("/login", request.url));
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/auth).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/auth).*)",],
 };

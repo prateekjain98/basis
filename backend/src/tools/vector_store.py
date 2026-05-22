@@ -1,4 +1,4 @@
-"""Vector store with Qdrant primary + in-memory fallback."""
+"""Vector store with Qdrant primary + Supabase fallback + in-memory dev fallback."""
 
 from __future__ import annotations
 
@@ -13,10 +13,11 @@ from llama_index.vector_stores.qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 
 from src.config import settings
+from src.db.supabase_client import get_supabase
 
 
 class SessionVectorStore:
-    """Per-session vector index. Falls back to in-memory if Qdrant unavailable."""
+    """Per-session vector index. Falls back to Supabase (cloud) or in-memory (dev)."""
 
     def __init__(self) -> None:
         self._qdrant: Optional[QdrantClient] = None
@@ -24,7 +25,7 @@ class SessionVectorStore:
         self._init_qdrant()
 
     def _init_qdrant(self) -> None:
-        if not settings.qdrant_url:
+        if not settings.qdrant_url or settings.qdrant_url == "http://localhost:6333":
             return
         try:
             kwargs = {"url": settings.qdrant_url, "timeout": 10}
@@ -33,7 +34,7 @@ class SessionVectorStore:
             self._qdrant = QdrantClient(**kwargs)
             self._qdrant.get_collections()
         except Exception as e:
-            print(f"[VectorStore] Qdrant unavailable ({e}), using in-memory fallback")
+            print(f"[VectorStore] Qdrant unavailable ({e}), using Supabase fallback")
             self._qdrant = None
 
     def index_documents(self, session_id: str, texts: List[str]) -> int:
@@ -44,18 +45,9 @@ class SessionVectorStore:
             try:
                 return self._index_qdrant(session_id, texts)
             except Exception as e:
-                print(f"[VectorStore] Qdrant index failed ({e}), falling back to memory")
+                print(f"[VectorStore] Qdrant index failed ({e}), falling back to Supabase")
 
-        # In-memory fallback: just store raw text chunks
-        chunks = []
-        for t in texts:
-            # Simple chunking: split into ~500 char chunks
-            for i in range(0, len(t), 500):
-                chunk = t[i:i + 500].strip()
-                if chunk:
-                    chunks.append(chunk)
-        self._fallback[session_id] = chunks
-        return len(chunks)
+        return self._index_supabase(session_id, texts)
 
     def _get_embed_model(self):
         if "localhost:11434" in settings.openai_base_url or "127.0.0.1:11434" in settings.openai_base_url:
@@ -83,15 +75,56 @@ class SessionVectorStore:
         VectorStoreIndex.from_documents(documents, storage_context=storage_context)
         return len(documents)
 
+    def _index_supabase(self, session_id: str, texts: List[str]) -> int:
+        """Store chunks in Supabase for stateless cloud deployment."""
+        db = get_supabase()
+        chunks = []
+        for t in texts:
+            for i in range(0, len(t), 1000):
+                chunk = t[i:i + 1000].strip()
+                if chunk:
+                    chunks.append(chunk)
+
+        # Upsert chunks into a simple table (gracefully handle missing table)
+        try:
+            for idx, chunk in enumerate(chunks):
+                db.table("document_chunks").upsert({
+                    "session_id": session_id,
+                    "chunk_index": idx,
+                    "content": chunk,
+                }).execute()
+        except Exception as e:
+            print(f"[VectorStore] Supabase chunks table missing ({e}), using in-memory only")
+
+        # Always keep in-memory for fast follow-ups within the same instance
+        self._fallback[session_id] = chunks
+        return len(chunks)
+
     def query(self, session_id: str, query: str, top_k: int = 5) -> List[str]:
         if self._qdrant is not None:
             try:
                 return self._query_qdrant(session_id, query, top_k)
             except Exception as e:
-                print(f"[VectorStore] Qdrant query failed ({e}), falling back to memory")
+                print(f"[VectorStore] Qdrant query failed ({e}), falling back to Supabase")
 
-        # In-memory fallback: simple keyword matching
+        return self._query_supabase(session_id, query, top_k)
+
+    def _query_supabase(self, session_id: str, query: str, top_k: int) -> List[str]:
+        """Query Supabase chunks via simple keyword matching + in-memory cache."""
+        # First check in-memory cache for this instance
         chunks = self._fallback.get(session_id, [])
+
+        # If not in memory, try loading from Supabase
+        if not chunks:
+            try:
+                db = get_supabase()
+                resp = db.table("document_chunks").select("content").eq("session_id", session_id).execute()
+                chunks = [r["content"] for r in resp.data]
+                self._fallback[session_id] = chunks
+            except Exception as e:
+                # Table may not exist yet; just use in-memory
+                print(f"[VectorStore] Supabase query failed ({e}), using in-memory only")
+
         if not chunks:
             return []
 
@@ -124,3 +157,8 @@ class SessionVectorStore:
             except Exception:
                 pass
         self._fallback.pop(session_id, None)
+        try:
+            db = get_supabase()
+            db.table("document_chunks").delete().eq("session_id", session_id).execute()
+        except Exception:
+            pass

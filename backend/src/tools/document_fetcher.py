@@ -95,7 +95,11 @@ class Candidate:
 class DocumentFetcher:
     """Finds, scores, and filters investment documents."""
 
-    def __init__(self, max_workers: int = 6) -> None:
+    # Simple in-memory cache: query -> (timestamp, candidates)
+    _search_cache: dict = {}
+    _CACHE_TTL = 3600  # 1 hour
+
+    def __init__(self, max_workers: int = 4) -> None:
         self.search = WebSearchTool()
         self._temp_dir = tempfile.mkdtemp(prefix="basis_docs_")
         self._max_workers = max_workers
@@ -112,8 +116,8 @@ class DocumentFetcher:
         self._score_candidates(candidates, theme)
         candidates.sort(key=lambda c: c.final_score, reverse=True)
 
-        # Download top 15 for validation
-        to_download = candidates[:15]
+        # Download top 10 for validation (reduced from 15 for speed)
+        to_download = candidates[:10]
         self._download_batch(to_download)
 
         # Re-score after download validation
@@ -141,7 +145,18 @@ class DocumentFetcher:
         ]
 
     def _discover_candidates(self, theme: str) -> List[Candidate]:
-        """Run multiple search strategies and deduplicate."""
+        """Run multiple search strategies and deduplicate.
+        
+        Uses cache to avoid redundant searches for popular themes.
+        Searches are parallelized via ThreadPoolExecutor.
+        """
+        cache_key = theme.lower().strip()
+        now = time.time()
+        cached = self._search_cache.get(cache_key)
+        if cached and (now - cached[0]) < self._CACHE_TTL:
+            print(f"[DocumentFetcher] Using cached discovery for '{theme[:40]}'")
+            return cached[1]
+
         queries = [
             f'"{theme}" investment report filetype:pdf',
             f'"{theme}" equity research pdf',
@@ -152,28 +167,30 @@ class DocumentFetcher:
         seen_urls = set()
         all_candidates: List[Candidate] = []
 
-        for q in queries:
-            try:
-                results = self.search.run(q, max_results=10)
-                time.sleep(1)  # rate-limit: avoid exhausting DDG connection pool
-            except Exception as e:
-                print(f"[DocumentFetcher] Search failed for '{q}': {e}")
-                continue
-
-            for r in results:
-                url = r.url.strip()
-                if url in seen_urls:
-                    continue
-                seen_urls.add(url)
-
-                # Quick URL filter: must look like a real document
-                if not self._url_passes_basic_check(url):
+        # Parallel search with rate limiting
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = {pool.submit(self.search.run, q, 10): q for q in queries}
+            for future in as_completed(futures):
+                q = futures[future]
+                try:
+                    results = future.result(timeout=20)
+                except Exception as e:
+                    print(f"[DocumentFetcher] Search failed for '{q}': {e}")
                     continue
 
-                all_candidates.append(
-                    Candidate(url=url, title=r.title or "", source_query=q)
-                )
+                for r in results:
+                    url = r.url.strip()
+                    if url in seen_urls:
+                        continue
+                    seen_urls.add(url)
+                    if not self._url_passes_basic_check(url):
+                        continue
+                    all_candidates.append(
+                        Candidate(url=url, title=r.title or "", source_query=q)
+                    )
 
+        self._search_cache[cache_key] = (now, all_candidates)
         return all_candidates
 
     def _score_candidates(self, candidates: List[Candidate], theme: str) -> None:
@@ -238,7 +255,7 @@ class DocumentFetcher:
                 "Accept": "application/pdf,*/*",
             }
             resp = requests.get(
-                c.url, headers=headers, timeout=30, stream=True, allow_redirects=True
+                c.url, headers=headers, timeout=10, stream=True, allow_redirects=True
             )
             resp.raise_for_status()
 

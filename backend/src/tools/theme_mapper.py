@@ -122,6 +122,8 @@ class ThemeMapper:
             results = []
 
         extracted = self._extract_tickers_from_results(results)
+        # Validate web search tickers before using them
+        extracted = self._validate_tickers(extracted)
 
         # Merge anchors + extracted, prefer anchors
         combined = anchors + [t for t in extracted if t not in anchors]
@@ -178,3 +180,22 @@ class ThemeMapper:
             filtered = [t for t in found if t not in FALSE_POSITIVES and t.isalpha()]
             tickers.extend(filtered)
         return tickers
+
+    @staticmethod
+    def _validate_tickers(tickers: List[str]) -> List[str]:
+        """Filter out tickers that don't exist on Yahoo Finance.
+        
+        This is a lightweight check using yfinance info() to avoid
+        scoring non-existent or delisted tickers later.
+        """
+        import yfinance as yf
+        valid = []
+        for t in tickers:
+            try:
+                info = yf.Ticker(t).info
+                # If we get a name back, ticker exists
+                if info.get("shortName") or info.get("longName"):
+                    valid.append(t)
+            except Exception:
+                pass
+        return valid

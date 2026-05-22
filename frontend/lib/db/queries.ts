@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { supabase } from "./supabase";
+import { createClient } from "@/utils/supabase/server";
 import { generateDummyPassword } from "./utils";
 
 export async function getUser(email: string): Promise<any> {
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("User")
     .select("*")
@@ -15,6 +16,7 @@ export async function createUser(
   email: string,
   password: string
 ): Promise<any> {
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("User")
     .insert({ email, password })
@@ -25,6 +27,7 @@ export async function createUser(
 }
 
 export async function createGuestUser(): Promise<any> {
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("User")
     .insert({
@@ -39,6 +42,7 @@ export async function createGuestUser(): Promise<any> {
 }
 
 export async function saveChat(chat: any): Promise<any> {
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("Chat")
     .insert(chat)
@@ -49,6 +53,7 @@ export async function saveChat(chat: any): Promise<any> {
 }
 
 export async function deleteChatById({ id }: { id: string }): Promise<any> {
+  const supabase = await createClient();
   await supabase.from("Vote_v2").delete().eq("chatId", id);
   await supabase.from("Message_v2").delete().eq("chatId", id);
   await supabase.from("Stream").delete().eq("chatId", id);
@@ -58,6 +63,7 @@ export async function deleteChatById({ id }: { id: string }): Promise<any> {
 }
 
 export async function deleteAllChatsByUserId(_args: any): Promise<any> {
+  const supabase = await createClient();
   const { userId } = _args;
   const { data: chats } = await supabase
     .from("Chat")
@@ -73,6 +79,7 @@ export async function deleteAllChatsByUserId(_args: any): Promise<any> {
 }
 
 export async function getChatsByUserId(_args: any): Promise<any> {
+  const supabase = await createClient();
   const { id, limit = 10, startingAfter, endingBefore } = _args;
   let query = supabase
     .from("Chat")
@@ -100,6 +107,7 @@ export async function getChatsByUserId(_args: any): Promise<any> {
 }
 
 export async function getChatById({ id }: { id: string }): Promise<any> {
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("Chat")
     .select("*")
@@ -114,6 +122,7 @@ export async function saveMessages({
 }: {
   messages: any[];
 }): Promise<any> {
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("Message_v2")
     .insert(messages)
@@ -129,6 +138,7 @@ export async function updateMessage({
   id: string;
   parts: any;
 }): Promise<any> {
+  const supabase = await createClient();
   const { error } = await supabase
     .from("Message_v2")
     .update({ parts })
@@ -142,6 +152,7 @@ export async function getMessagesByChatId({
 }: {
   id: string;
 }): Promise<any> {
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("Message_v2")
     .select("*")
@@ -152,6 +163,7 @@ export async function getMessagesByChatId({
 }
 
 export async function getMessageById({ id }: { id: string }): Promise<any> {
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("Message_v2")
     .select("*")
@@ -165,6 +177,7 @@ export async function voteMessage({
   messageId,
   type,
 }: any): Promise<any> {
+  const supabase = await createClient();
   const { error } = await supabase.from("Vote_v2").upsert({
     chatId,
     messageId,
@@ -175,6 +188,7 @@ export async function voteMessage({
 }
 
 export async function getVotesByChatId({ id }: { id: string }): Promise<any> {
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("Vote_v2")
     .select("*")
@@ -190,6 +204,7 @@ export async function saveDocument({
   content,
   userId,
 }: any): Promise<any> {
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("Document")
     .insert({ id, title, kind, content, userId, createdAt: new Date().toISOString() })
@@ -200,6 +215,7 @@ export async function saveDocument({
 }
 
 export async function updateDocumentContent({ id, content }: any): Promise<any> {
+  const supabase = await createClient();
   const { data: latest, error: selectError } = await supabase
     .from("Document")
     .select("createdAt")
@@ -222,6 +238,7 @@ export async function updateDocumentContent({ id, content }: any): Promise<any> 
 }
 
 export async function getDocumentsById({ id }: { id: string }): Promise<any> {
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("Document")
     .select("*")
@@ -232,6 +249,7 @@ export async function getDocumentsById({ id }: { id: string }): Promise<any> {
 }
 
 export async function getDocumentById({ id }: { id: string }): Promise<any> {
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("Document")
     .select("*")
@@ -247,6 +265,7 @@ export async function deleteDocumentsByIdAfterTimestamp({
   id,
   timestamp,
 }: any): Promise<any> {
+  const supabase = await createClient();
   const ts =
     timestamp instanceof Date ? timestamp.toISOString() : new Date(timestamp).toISOString();
   const { error } = await supabase
@@ -258,6 +277,7 @@ export async function deleteDocumentsByIdAfterTimestamp({
 }
 
 export async function saveSuggestions({ suggestions }: any): Promise<any> {
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("Suggestion")
     .insert(suggestions)
@@ -271,6 +291,7 @@ export async function getSuggestionsByDocumentId({
 }: {
   documentId: string;
 }): Promise<any> {
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("Suggestion")
     .select("*")
@@ -283,6 +304,7 @@ export async function getMessageCountByUserId({
   id,
   differenceInHours,
 }: any): Promise<any> {
+  const supabase = await createClient();
   const since = new Date(
     Date.now() - differenceInHours * 60 * 60 * 1000
   ).toISOString();
@@ -309,6 +331,7 @@ export async function getMessageCountByUserId({
 }
 
 export async function updateChatTitleById({ chatId, title }: any): Promise<any> {
+  const supabase = await createClient();
   const { error } = await supabase
     .from("Chat")
     .update({ title })
@@ -318,6 +341,7 @@ export async function updateChatTitleById({ chatId, title }: any): Promise<any> 
 }
 
 export async function createStreamId({ streamId, chatId }: any): Promise<any> {
+  const supabase = await createClient();
   const { error } = await supabase
     .from("Stream")
     .insert({ id: streamId, chatId, createdAt: new Date().toISOString() });
@@ -328,6 +352,7 @@ export async function deleteMessagesByChatIdAfterTimestamp({
   chatId,
   timestamp,
 }: any): Promise<any> {
+  const supabase = await createClient();
   const ts =
     timestamp instanceof Date ? timestamp.toISOString() : new Date(timestamp).toISOString();
 
@@ -354,6 +379,7 @@ export async function updateChatVisibilityById({
   chatId,
   visibility,
 }: any): Promise<any> {
+  const supabase = await createClient();
   const { error } = await supabase
     .from("Chat")
     .update({ visibility })
