@@ -26,14 +26,19 @@ export async function GET(request: NextRequest) {
     return new ChatbotError("unauthorized:chat").toResponse();
   }
 
-  const chats = await getChatsByUserId({
-    id: session.user.id,
-    limit,
-    startingAfter,
-    endingBefore,
-  });
+  try {
+    const chats = await getChatsByUserId({
+      id: session.user.id,
+      limit,
+      startingAfter,
+      endingBefore,
+    });
 
-  return Response.json(chats);
+    return Response.json(chats);
+  } catch (err: any) {
+    console.warn("[API /history] Supabase error, returning empty:", err);
+    return Response.json([]);
+  }
 }
 
 export async function DELETE() {
@@ -43,7 +48,11 @@ export async function DELETE() {
     return new ChatbotError("unauthorized:chat").toResponse();
   }
 
-  const result = await deleteAllChatsByUserId({ userId: session.user.id });
-
-  return Response.json(result, { status: 200 });
+  try {
+    const result = await deleteAllChatsByUserId({ userId: session.user.id });
+    return Response.json(result, { status: 200 });
+  } catch (err: any) {
+    console.warn("[API /history] Delete error:", err);
+    return Response.json({ success: false });
+  }
 }

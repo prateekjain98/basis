@@ -10,13 +10,39 @@ export async function GET(request: Request) {
     return Response.json({ error: "chatId required" }, { status: 400 });
   }
 
-  const [session, chat, messages] = await Promise.all([
-    auth(),
-    getChatById({ id: chatId }),
-    getMessagesByChatId({ id: chatId }),
-  ]);
+  try {
+    const [session, chat, messages] = await Promise.all([
+      auth(),
+      getChatById({ id: chatId }),
+      getMessagesByChatId({ id: chatId }),
+    ]);
 
-  if (!chat) {
+    if (!chat) {
+      return Response.json({
+        messages: [],
+        visibility: "private",
+        userId: null,
+        isReadonly: false,
+      });
+    }
+
+    if (
+      chat.visibility === "private" &&
+      (!session?.user || session.user.id !== chat.userId)
+    ) {
+      return Response.json({ error: "forbidden" }, { status: 403 });
+    }
+
+    const isReadonly = !session?.user || session.user.id !== chat.userId;
+
+    return Response.json({
+      messages: convertToUIMessages(messages),
+      visibility: chat.visibility,
+      userId: chat.userId,
+      isReadonly,
+    });
+  } catch (err: any) {
+    console.warn("[API /messages] Supabase error, returning empty:", err);
     return Response.json({
       messages: [],
       visibility: "private",
@@ -24,20 +50,4 @@ export async function GET(request: Request) {
       isReadonly: false,
     });
   }
-
-  if (
-    chat.visibility === "private" &&
-    (!session?.user || session.user.id !== chat.userId)
-  ) {
-    return Response.json({ error: "forbidden" }, { status: 403 });
-  }
-
-  const isReadonly = !session?.user || session.user.id !== chat.userId;
-
-  return Response.json({
-    messages: convertToUIMessages(messages),
-    visibility: chat.visibility,
-    userId: chat.userId,
-    isReadonly,
-  });
 }
