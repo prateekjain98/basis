@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from src.config import settings
@@ -14,7 +15,7 @@ class _InMemoryTable:
         self._rows: list[dict] = []
 
     def select(self, *cols: str) -> "_InMemoryQuery":
-        return _InMemoryQuery(self._rows)
+        return _InMemoryQuery(self)
 
     def insert(self, data: dict | list) -> "_InMemoryAction":
         if isinstance(data, dict):
@@ -23,15 +24,16 @@ class _InMemoryTable:
         return _InMemoryAction(data)
 
     def update(self, data: dict) -> "_InMemoryQuery":
-        return _InMemoryQuery(self._rows, update_data=data)
+        return _InMemoryQuery(self, update_data=data)
 
     def delete(self) -> "_InMemoryQuery":
-        return _InMemoryQuery(self._rows, delete=True)
+        return _InMemoryQuery(self, delete=True)
 
 
 class _InMemoryQuery:
-    def __init__(self, rows: list, update_data: dict | None = None, delete: bool = False) -> None:
-        self._rows = list(rows)
+    def __init__(self, table: _InMemoryTable, update_data: dict | None = None, delete: bool = False) -> None:
+        self._table = table
+        self._rows = list(table._rows)
         self._update_data = update_data
         self._delete = delete
         self._filters: list = []
@@ -51,8 +53,8 @@ class _InMemoryQuery:
 
         if self._delete:
             for r in result:
-                if r in self._rows:
-                    self._rows.remove(r)
+                if r in self._table._rows:
+                    self._table._rows.remove(r)
             return _MockResponse([{"deleted": True}])
 
         if self._update_data:
@@ -97,6 +99,8 @@ def get_supabase() -> Any:
     if _supabase is not None:
         return _supabase
 
+    force_supabase = os.getenv("FORCE_SUPABASE", "").lower() in ("1", "true", "yes")
+
     if settings.supabase_url and settings.supabase_key:
         try:
             from supabase import create_client
@@ -107,6 +111,8 @@ def get_supabase() -> Any:
             print("[Supabase] Connected to remote")
             return _supabase
         except Exception as e:
+            if force_supabase:
+                raise RuntimeError(f"FORCE_SUPABASE is set but connection failed: {e}") from e
             print(f"[Supabase] Remote connection failed ({e}), using in-memory fallback")
 
     if _db is None:

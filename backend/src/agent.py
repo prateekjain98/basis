@@ -73,6 +73,7 @@ from src.tools.document_parser import DocumentParser
 from src.tools.stock_scorer import StockScorer
 from src.tools.vector_store import SessionVectorStore
 from src.tools.web_search import WebSearchTool
+from src.tools.theme_mapper import ThemeMapper
 
 
 class Agent:
@@ -82,6 +83,7 @@ class Agent:
         self.vector_store = SessionVectorStore()
         self.scorer = StockScorer()
         self.web_search = WebSearchTool()
+        self.theme_mapper = ThemeMapper()
         self.client = _get_llm_client()
         if settings.vertex_project:
             self.model = settings.vertex_model or "gemini-2.0-flash-001"
@@ -101,31 +103,37 @@ class Agent:
         raw_data: dict = {"query": query, "documents": [], "chunks": [], "stocks": []}
 
         # --- Load or create session -----------------------------------------
-        if session_id:
-            resp = await asyncio.to_thread(
-                self.db.table("thesis_sessions").select("*").eq("id", session_id).execute
-            )
-            if resp.data:
-                is_followup = True
-                docs_resp = await asyncio.to_thread(
-                    self.db.table("documents").select("*").eq("thesis_id", session_id).execute
+        try:
+            if session_id:
+                resp = await asyncio.to_thread(
+                    self.db.table("thesis_sessions").select("*").eq("id", session_id).execute
                 )
-                existing_docs = docs_resp.data or []
-            else:
-                yield "Session not found. Starting a new thesis.\n\n"
-                session_id = None
+                if resp.data:
+                    is_followup = True
+                    docs_resp = await asyncio.to_thread(
+                        self.db.table("documents").select("*").eq("thesis_id", session_id).execute
+                    )
+                    existing_docs = docs_resp.data or []
+                else:
+                    yield "Session not found. Starting a new thesis.\n\n"
+                    session_id = None
+
+            if session_id is None:
+                session_id = str(uuid.uuid4())
+                await asyncio.to_thread(
+                    self.db.table("thesis_sessions").insert({"id": session_id, "user_query": query}).execute
+                )
+
+            await asyncio.to_thread(
+                self.db.table("messages").insert({"session_id": session_id, "role": "user", "content": query}).execute
+            )
+        except Exception as e:
+            print(f"[Agent] DB error during session setup: {e}")
 
         if session_id is None:
             session_id = str(uuid.uuid4())
-            await asyncio.to_thread(
-                self.db.table("thesis_sessions").insert({"id": session_id, "user_query": query}).execute
-            )
 
-        await asyncio.to_thread(
-            self.db.table("messages").insert({"session_id": session_id, "role": "user", "content": query}).execute
-        )
-
-        yield f"**Thesis ID:** `{session_id[:8]}`\n\n"
+        yield f"**Thesis ID:** `{session_id}`\n\n"
 
         # --- First turn: discover documents ---------------------------------
         if not is_followup or not existing_docs:
@@ -148,14 +156,17 @@ class Agent:
                 text = await asyncio.to_thread(self.parser.parse, d["path"])
                 if text:
                     texts.append(text)
-                    await asyncio.to_thread(
-                        self.db.table("documents").insert({
-                            "thesis_id": session_id,
-                            "url": d["url"],
-                            "title": d["title"],
-                            "parsed_content": text[:2000],
-                        }).execute
-                    )
+                    try:
+                        await asyncio.to_thread(
+                            self.db.table("documents").insert({
+                                "thesis_id": session_id,
+                                "url": d["url"],
+                                "title": d["title"],
+                                "parsed_content": text[:2000],
+                            }).execute
+                        )
+                    except Exception as e:
+                        print(f"[Agent] DB error saving document: {e}")
                     yield f"- [{d['title']}]({d['url']}): {len(text)} chars\n"
                 else:
                     yield f"- Failed: [{d['title']}]({d['url']})\n"
@@ -240,15 +251,37 @@ class Agent:
             parsed = {"theme": query, "summary": "", "conviction": "Medium", "stocks": []}
 
         # --- Save thesis & score stocks -------------------------------------
-        await asyncio.to_thread(
-            self.db.table("thesis_sessions").update({
-                "theme": parsed.get("theme", query),
-                "summary": parsed.get("summary", ""),
-                "conviction": parsed.get("conviction", "Medium"),
-            }).eq("id", session_id).execute
-        )
+        try:
+            await asyncio.to_thread(
+                self.db.table("thesis_sessions").update({
+                    "theme": parsed.get("theme", query),
+                    "summary": parsed.get("summary", ""),
+                    "conviction": parsed.get("conviction", "Medium"),
+                }).eq("id", session_id).execute
+            )
+        except Exception as e:
+            print(f"[Agent] DB error updating thesis: {e}")
 
         stocks = parsed.get("stocks", [])
+
+        # --- ThemeMapper fallback -------------------------------------------
+        # If LLM produced no stocks or only generic FAANG, use ThemeMapper
+        GENERIC_TICKERS = {"AAPL", "GOOGL", "MSFT", "AMZN", "META", "TSLA", "NVDA", "GOOG"}
+        llm_tickers = {s.get("ticker", "").upper() for s in stocks}
+        if len(stocks) < 3 or llm_tickers.issubset(GENERIC_TICKERS):
+            theme = parsed.get("theme", query)
+            yield f"**Deep research** mapping '{theme}' to specific companies...\n\n"
+            mapped = self.theme_mapper.map_themes([theme], max_results_per_theme=5)
+            print(f"[Agent] ThemeMapper returned {len(mapped)} tickers: {[m['ticker'] for m in mapped]}")
+            for m in mapped:
+                if m["ticker"] not in llm_tickers:
+                    stocks.append({
+                        "ticker": m["ticker"],
+                        "name": m["ticker"],
+                        "rationale": f"Mapped from theme: {m['theme']}",
+                        "thematic_fit_score": 75,
+                    })
+
         print(f"[Agent] Scoring {len(stocks)} stocks")
         scored = []
         for s in stocks:
@@ -263,21 +296,24 @@ class Agent:
                 sr["fundamentals_score"] * 0.30 + fit * 0.25 + sr["risk_score"] * 0.20
                 + sr["momentum_score"] * 0.15 + sr["liquidity_score"] * 0.10, 1
             )
-            await asyncio.to_thread(
-                self.db.table("stock_recommendations").insert({
-                    "thesis_id": session_id,
-                    "ticker": ticker,
-                    "name": s.get("name"),
-                    "entry_price": m.current_price,
-                    "fundamentals_score": sr["fundamentals_score"],
-                    "thematic_fit_score": fit,
-                    "risk_score": sr["risk_score"],
-                    "momentum_score": sr["momentum_score"],
-                    "liquidity_score": sr["liquidity_score"],
-                    "total_score": total,
-                    "rationale": s.get("rationale"),
-                }).execute
-            )
+            try:
+                await asyncio.to_thread(
+                    self.db.table("stock_recommendations").insert({
+                        "thesis_id": session_id,
+                        "ticker": ticker,
+                        "name": s.get("name"),
+                        "entry_price": m.current_price,
+                        "fundamentals_score": sr["fundamentals_score"],
+                        "thematic_fit_score": fit,
+                        "risk_score": sr["risk_score"],
+                        "momentum_score": sr["momentum_score"],
+                        "liquidity_score": sr["liquidity_score"],
+                        "total_score": total,
+                        "rationale": s.get("rationale"),
+                    }).execute
+                )
+            except Exception as e:
+                print(f"[Agent] DB error saving stock {ticker}: {e}")
             scored.append({
                 "ticker": ticker, "name": s.get("name", ticker), "rationale": s.get("rationale", ""),
                 "entry": m.current_price, "fundamentals": sr["fundamentals_score"],
@@ -289,11 +325,14 @@ class Agent:
         print(f"[Agent] Pipeline complete in {time.time()-start_time:.1f}s")
 
         text = self._format(parsed, scored)
-        await asyncio.to_thread(
-            self.db.table("messages").insert({
-                "session_id": session_id, "role": "assistant", "content": text
-            }).execute
-        )
+        try:
+            await asyncio.to_thread(
+                self.db.table("messages").insert({
+                    "session_id": session_id, "role": "assistant", "content": text
+                }).execute
+            )
+        except Exception as e:
+            print(f"[Agent] DB error saving assistant message: {e}")
         yield text
 
     @staticmethod

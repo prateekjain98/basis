@@ -26,7 +26,7 @@ import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
 import type { Vote } from "@/lib/db/schema";
 import { ChatbotError } from "@/lib/errors";
 import type { ChatMessage } from "@/lib/types";
-import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
+import { fetcher, fetchWithErrorHandlers, generateUUID, getTextFromMessage } from "@/lib/utils";
 
 type ActiveChatContextValue = {
   chatId: string;
@@ -138,6 +138,16 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
             })
           );
 
+        let storedSessionId: string | null = null;
+        try {
+          storedSessionId =
+            typeof window !== "undefined"
+              ? localStorage.getItem(`basis_chat_session_${request.id}`)
+              : null;
+        } catch {
+          storedSessionId = null;
+        }
+
         return {
           body: {
             id: request.id,
@@ -146,6 +156,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
               : { message: lastMessage }),
             selectedChatModel: currentModelIdRef.current,
             selectedVisibilityType: visibility,
+            session_id: storedSessionId,
             ...request.body,
           },
         };
@@ -154,7 +165,16 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     onData: (dataPart) => {
       setDataStream((ds) => (ds ? [...ds, dataPart] : []));
     },
-    onFinish: () => {
+    onFinish: ({ message }) => {
+      try {
+        const text = getTextFromMessage(message);
+        const match = text.match(/\*\*Thesis ID:\*\* `([a-f0-9-]+)`/);
+        if (match) {
+          localStorage.setItem(`basis_chat_session_${chatId}`, match[1]);
+        }
+      } catch {
+        // ignore localStorage errors
+      }
       mutate(unstable_serialize(getChatHistoryPaginationKey));
     },
     onError: (error) => {
@@ -228,7 +248,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
   }, [sendMessage, chatId]);
 
   useAutoResume({
-    autoResume: !isNewChat && !!chatData,
+    autoResume: false, // backend does not support stream resumption
     initialMessages,
     resumeStream,
     setMessages,

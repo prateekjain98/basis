@@ -1,13 +1,7 @@
-import { NextResponse } from "next/server";
-
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
-
-// NOTE: In-memory map won't persist across serverless invocations.
-const chatToSession = new Map<string, string>();
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const chatId = body.id as string | undefined;
 
   let messages: Array<{ role: string; content: string }> = [];
 
@@ -30,7 +24,7 @@ export async function POST(request: Request) {
     });
   }
 
-  const sessionId = chatId ? chatToSession.get(chatId) : undefined;
+  const sessionId = body.session_id as string | undefined | null;
 
   const backendBody = {
     messages,
@@ -45,15 +39,13 @@ export async function POST(request: Request) {
 
   if (!backendRes.ok) {
     const text = await backendRes.text();
-    return NextResponse.json(
+    return Response.json(
       { code: "offline:chat", message: "Backend error", cause: text },
       { status: backendRes.status }
     );
   }
 
   const reader = backendRes.body?.getReader();
-  const decoder = new TextDecoder();
-  let sessionIdCaptured = false;
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -61,27 +53,27 @@ export async function POST(request: Request) {
         controller.close();
         return;
       }
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-
-        if (!sessionIdCaptured && chatId && !sessionId) {
-          const match = chunk.match(/\*\*Thesis ID:\*\* `([a-f0-9]+)`/);
-          if (match) {
-            chatToSession.set(chatId, match[1]);
-            sessionIdCaptured = true;
-          }
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          controller.enqueue(value);
         }
-
-        controller.enqueue(value);
+        controller.close();
+      } catch (error) {
+        controller.error(error);
       }
-      controller.close();
+    },
+    cancel() {
+      reader?.cancel();
     },
   });
 
-  return new NextResponse(stream, {
-    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Accel-Buffering": "no",
+    },
   });
 }
