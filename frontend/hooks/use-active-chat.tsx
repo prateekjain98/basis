@@ -178,9 +178,11 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       },
     }),
     onData: (dataPart) => {
+      console.log("[useChat] onData:", dataPart);
       setDataStream((ds) => (ds ? [...ds, dataPart] : []));
     },
     onFinish: async ({ message }) => {
+      console.log("[useChat] onFinish, message:", message);
       try {
         const text = getTextFromMessage(message);
         const match = text.match(/\*\*Thesis ID:\*\* `([a-f0-9-]+)`/);
@@ -211,6 +213,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       mutate(unstable_serialize(getChatHistoryPaginationKey));
     },
     onError: (error) => {
+      console.error("[useChat] onError:", error);
       if (error.message?.includes("AI Gateway requires a valid credit card")) {
         setShowCreditCardAlert(true);
       } else if (error instanceof ChatbotError) {
@@ -274,6 +277,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
         // ignore persistence errors
       }
 
+      console.log("[sendMessage] calling rawSendMessage");
       return rawSendMessage(message);
     };
   }, [rawSendMessage, chatId]);
@@ -283,6 +287,10 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
   if (isNewChat && !loadedChatIds.current.has(newChatIdRef.current)) {
     loadedChatIds.current.add(newChatIdRef.current);
   }
+
+  useEffect(() => {
+    console.log("[useChat] status:", status, "messages count:", messages.length);
+  }, [status, messages]);
 
   useEffect(() => {
     if (loadedChatIds.current.has(chatId)) {

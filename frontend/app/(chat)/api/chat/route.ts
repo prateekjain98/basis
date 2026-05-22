@@ -1,3 +1,5 @@
+import { NextResponse } from "next/server";
+
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
 
 export async function POST(request: Request) {
@@ -5,7 +7,10 @@ export async function POST(request: Request) {
   try {
     body = await request.json();
   } catch {
-    return Response.json({ code: "bad_request", message: "Invalid JSON" }, { status: 400 });
+    return NextResponse.json(
+      { code: "bad_request", message: "Invalid JSON" },
+      { status: 400 }
+    );
   }
 
   let messages: Array<{ role: string; content: string }> = [];
@@ -45,13 +50,30 @@ export async function POST(request: Request) {
 
     if (!backendRes.ok) {
       const text = await backendRes.text();
-      return Response.json(
-        { code: "backend_error", message: "Backend error", cause: text.slice(0, 500) },
+      return NextResponse.json(
+        {
+          code: "backend_error",
+          message: "Backend error",
+          cause: text.slice(0, 500),
+        },
         { status: backendRes.status }
       );
     }
 
-    return new Response(backendRes.body, {
+    if (!backendRes.body) {
+      return NextResponse.json(
+        { code: "backend_error", message: "Backend returned empty body" },
+        { status: 502 }
+      );
+    }
+
+    // Use TransformStream to ensure proper streaming through Next.js / Vercel
+    const { readable, writable } = new TransformStream();
+    backendRes.body.pipeTo(writable).catch((err) => {
+      console.error("[API /chat] Error piping backend stream:", err);
+    });
+
+    return new NextResponse(readable, {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
         "Cache-Control": "no-store",
@@ -59,8 +81,13 @@ export async function POST(request: Request) {
       },
     });
   } catch (err: any) {
-    return Response.json(
-      { code: "backend_unreachable", message: "Cannot reach backend", cause: err.message },
+    console.error("[API /chat] Error forwarding to backend:", err);
+    return NextResponse.json(
+      {
+        code: "backend_unreachable",
+        message: "Cannot reach backend",
+        cause: err.message,
+      },
       { status: 503 }
     );
   }

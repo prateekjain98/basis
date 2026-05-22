@@ -16,25 +16,9 @@ export function cn(...inputs: ClassValue[]) {
 let _nativeFetch: typeof fetch | null = null;
 
 export function getNativeFetch(): typeof fetch {
-  if (typeof window === 'undefined') return fetch;
-  if (_nativeFetch) return _nativeFetch;
-  try {
-    const iframe = document.createElement('iframe');
-    iframe.style.display = 'none';
-    document.body.appendChild(iframe);
-    const win = iframe.contentWindow;
-    if (win && win.fetch !== window.fetch) {
-      _nativeFetch = win.fetch.bind(win);
-      // Keep the iframe in the DOM so its global scope doesn't shut down.
-      // Hidden and inaccessible, it provides a clean fetch reference.
-      return _nativeFetch;
-    }
-    document.body.removeChild(iframe);
-  } catch {
-    // ignore
-  }
-  _nativeFetch = fetch;
-  return _nativeFetch;
+  // Simplified: just use global fetch. The iframe workaround caused issues
+  // in some environments (null document.body, CSP restrictions).
+  return fetch;
 }
 
 export const fetcher = async (url: string) => {
@@ -56,6 +40,7 @@ export async function fetchWithErrorHandlers(
   const doFetch = typeof window !== 'undefined' ? getNativeFetch() : fetch;
   try {
     const response = await doFetch(input, init);
+    console.log("[fetchWithErrorHandlers] response status:", response.status, "url:", typeof input === 'string' ? input : input.toString());
 
     if (!response.ok) {
       const text = await response.text();

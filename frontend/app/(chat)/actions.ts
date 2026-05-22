@@ -21,15 +21,30 @@ export async function saveChatModelAsCookie(model: string) {
 }
 
 export async function ensureUser() {
-  const session = await auth();
-  if (!session?.user) return null;
+  try {
+    const session = await auth();
+    if (!session?.user) return null;
 
-  const existing = await getUser(session.user.email);
-  if (existing && existing.length > 0) {
-    return existing[0];
+    const existing = await getUser(session.user.email);
+    if (existing && existing.length > 0) {
+      return existing[0];
+    }
+
+    return await createUser(
+      session.user.email,
+      "demo-password",
+      session.user.id
+    );
+  } catch (err) {
+    console.warn("[ensureUser] Supabase error, returning mock user:", err);
+    const session = await auth();
+    return (
+      session?.user ?? {
+        id: "00000000-0000-0000-0000-000000000001",
+        email: "demo@basis.ai",
+      }
+    );
   }
-
-  return await createUser(session.user.email, "demo-password", session.user.id);
 }
 
 export async function createChat({
@@ -43,21 +58,32 @@ export async function createChat({
   userId: string;
   visibility?: VisibilityType;
 }) {
-  // Ensure user exists before creating chat (FK constraint)
-  const existing = await getUserById(userId);
-  if (!existing) {
-    const session = await auth();
-    if (session?.user?.email) {
-      await createUser(session.user.email, "demo-password");
+  try {
+    // Ensure user exists before creating chat (FK constraint)
+    const existing = await getUserById(userId);
+    if (!existing) {
+      const session = await auth();
+      if (session?.user?.email) {
+        await createUser(session.user.email, "demo-password");
+      }
     }
+    return await saveChat({
+      id,
+      title,
+      userId,
+      visibility,
+      createdAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn("[createChat] Supabase error, returning mock chat:", err);
+    return {
+      id,
+      title,
+      userId,
+      visibility,
+      createdAt: new Date().toISOString(),
+    };
   }
-  return await saveChat({
-    id,
-    title,
-    userId,
-    visibility,
-    createdAt: new Date().toISOString(),
-  });
 }
 
 export async function createMessages({
@@ -71,7 +97,12 @@ export async function createMessages({
     createdAt: string;
   }>;
 }) {
-  return await saveMessages({ messages });
+  try {
+    return await saveMessages({ messages });
+  } catch (err) {
+    console.warn("[createMessages] Supabase error, ignoring:", err);
+    return messages;
+  }
 }
 
 export async function generateTitleFromUserMessage({
@@ -84,7 +115,11 @@ export async function generateTitleFromUserMessage({
       ?.filter((p) => p.type === "text")
       .map((p) => p.text)
       .join("") || "New chat";
-  return text.slice(0, 40).replace(/^[#*"\s]+/, "").replace(/["]+$/, "").trim();
+  return text
+    .slice(0, 40)
+    .replace(/^[#*"\s]+/, "")
+    .replace(/["]+$/, "")
+    .trim();
 }
 
 export async function deleteTrailingMessages({ id }: { id: string }) {
