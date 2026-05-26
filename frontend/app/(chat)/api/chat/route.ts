@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { deleteChatById } from "@/lib/db/queries";
 
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
 
@@ -42,11 +43,16 @@ export async function POST(request: Request) {
   };
 
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 55000);
+
     const backendRes = await fetch(`${BACKEND_URL}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(backendBody),
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
 
     if (!backendRes.ok) {
       const text = await backendRes.text();
@@ -81,6 +87,12 @@ export async function POST(request: Request) {
       },
     });
   } catch (err: any) {
+    if (err.name === "AbortError") {
+      return NextResponse.json(
+        { code: "backend_timeout", message: "Backend took too long to respond. Try a shorter query." },
+        { status: 504 }
+      );
+    }
     console.error("[API /chat] Error forwarding to backend:", err);
     return NextResponse.json(
       {
@@ -90,5 +102,20 @@ export async function POST(request: Request) {
       },
       { status: 503 }
     );
+  }
+}
+
+export async function DELETE(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get("id");
+  if (!id) {
+    return NextResponse.json({ error: "id required" }, { status: 400 });
+  }
+  try {
+    await deleteChatById({ id });
+    return NextResponse.json({ success: true });
+  } catch (err: any) {
+    console.error("[API /chat] Delete error:", err);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
