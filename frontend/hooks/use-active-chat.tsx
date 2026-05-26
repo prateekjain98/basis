@@ -138,21 +138,9 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       );
     },
     transport: new TextStreamChatTransport({
-      api: `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/chat`,
+      api: `${process.env.NEXT_PUBLIC_BACKEND_URL ?? ""}/chat`,
       fetch: fetchWithErrorHandlers,
       prepareSendMessagesRequest(request) {
-        const lastMessage = request.messages.at(-1);
-        const isToolApprovalContinuation =
-          lastMessage?.role !== "user" ||
-          request.messages.some((msg) =>
-            msg.parts?.some((part) => {
-              const state = (part as { state?: string }).state;
-              return (
-                state === "approval-responded" || state === "output-denied"
-              );
-            })
-          );
-
         let storedSessionId: string | null = null;
         try {
           storedSessionId =
@@ -163,16 +151,19 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
           storedSessionId = null;
         }
 
+        // Convert AI SDK message format (parts) to backend format (content)
+        const messages = request.messages.map((msg) => {
+          const text = msg.parts
+            ?.filter((p: any) => p.type === "text")
+            .map((p: any) => p.text)
+            .join("");
+          return { role: msg.role, content: text || "" };
+        });
+
         return {
           body: {
-            id: request.id,
-            ...(isToolApprovalContinuation
-              ? { messages: request.messages }
-              : { message: lastMessage }),
-            selectedChatModel: currentModelIdRef.current,
-            selectedVisibilityType: visibility,
+            messages,
             session_id: storedSessionId,
-            ...request.body,
           },
         };
       },
