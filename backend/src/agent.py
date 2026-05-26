@@ -112,6 +112,12 @@ class Agent:
         # Total pipeline timeout: if we exceed this, return partial results
         PIPELINE_TIMEOUT = 75.0
 
+        # Validate session_id format (must be a valid UUID)
+        _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+        if session_id and not _UUID_RE.match(session_id):
+            print(f"[Agent] Invalid session_id format: {session_id!r}, treating as None")
+            session_id = None
+
         # --- Load or create session -----------------------------------------
         try:
             if session_id:
@@ -126,10 +132,12 @@ class Agent:
                     existing_docs = docs_resp.data or []
                 else:
                     yield "Session not found. Starting a new thesis.\n\n"
-                    session_id = None
+                    # Keep the provided session_id so follow-ups use the same ID
 
-            if session_id is None:
-                session_id = str(uuid.uuid4())
+            if not is_followup:
+                # Create new session (use provided id if valid, else generate one)
+                if not session_id:
+                    session_id = str(uuid.uuid4())
                 await asyncio.to_thread(
                     self.db.table("thesis_sessions").insert({"id": session_id, "user_query": query}).execute
                 )
@@ -139,8 +147,11 @@ class Agent:
             )
         except Exception as e:
             print(f"[Agent] DB error during session setup: {e}")
+            # If DB ops failed, ensure we have a valid session_id to continue
+            if not session_id:
+                session_id = str(uuid.uuid4())
 
-        if session_id is None:
+        if not session_id:
             session_id = str(uuid.uuid4())
 
         yield f"**Thesis ID:** `{session_id}`\n\n"
@@ -251,6 +262,7 @@ class Agent:
             "content": f"Question: {query}\n\nResearch context:\n{context[:6000]}",
         })
 
+        parsed = {"theme": query, "summary": "", "conviction": "Medium", "stocks": []}
         try:
             raw = await _llm_chat(self.client, messages, self.model, temperature=0.3, max_tokens=3000)
             # Extract JSON from markdown fences or plain text preamble
@@ -264,9 +276,11 @@ class Agent:
             print(f"[Agent] LLM parsed: theme={parsed.get('theme')}, stocks={len(parsed.get('stocks', []))}")
         except Exception as e:
             print(f"[Agent] LLM JSON parse failed: {e}")
-            print(f"[Agent] Raw LLM output (first 500 chars): {raw[:500]}")
+            try:
+                print(f"[Agent] Raw LLM output (first 500 chars): {raw[:500]}")
+            except:
+                pass
             yield f"LLM error: {e}\n\n"
-            parsed = {"theme": query, "summary": "", "conviction": "Medium", "stocks": []}
 
         # --- Save thesis & score stocks -------------------------------------
         try:

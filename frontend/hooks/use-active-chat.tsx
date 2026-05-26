@@ -141,15 +141,9 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       api: `${process.env.NEXT_PUBLIC_BACKEND_URL ?? ""}/chat`,
       fetch: fetchWithErrorHandlers,
       prepareSendMessagesRequest(request) {
-        let storedSessionId: string | null = null;
-        try {
-          storedSessionId =
-            typeof window !== "undefined"
-              ? localStorage.getItem(`basis_chat_session_${request.id}`)
-              : null;
-        } catch {
-          storedSessionId = null;
-        }
+        // Use the chatId (request.id) as the stable session_id so follow-ups
+        // are always tied to the same backend session.
+        const session_id = request.id;
 
         // Convert AI SDK message format (parts) to backend format (content)
         const messages = request.messages.map((msg) => {
@@ -163,7 +157,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
         return {
           body: {
             messages,
-            session_id: storedSessionId,
+            session_id,
           },
         };
       },
@@ -174,15 +168,6 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     },
     onFinish: async ({ message }) => {
       console.log("[useChat] onFinish, message:", message);
-      try {
-        const text = getTextFromMessage(message);
-        const match = text.match(/\*\*Thesis ID:\*\* `([a-f0-9-]+)`/);
-        if (match) {
-          localStorage.setItem(`basis_chat_session_${chatId}`, match[1]);
-        }
-      } catch {
-        // ignore localStorage errors
-      }
 
       // Persist assistant message
       try {
