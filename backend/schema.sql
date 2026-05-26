@@ -52,11 +52,21 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Document chunks for vector search fallback (when Qdrant is unavailable)
+CREATE TABLE IF NOT EXISTS document_chunks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID REFERENCES thesis_sessions(id) ON DELETE CASCADE,
+    chunk_index INTEGER NOT NULL DEFAULT 0,
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_sessions_created ON thesis_sessions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_stocks_thesis ON stock_recommendations(thesis_id);
 CREATE INDEX IF NOT EXISTS idx_docs_thesis ON documents(thesis_id);
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chunks_session ON document_chunks(session_id, chunk_index);
 
 -- Enable RLS (optional, but good practice)
 ALTER TABLE thesis_sessions ENABLE ROW LEVEL SECURITY;
