@@ -6,7 +6,6 @@ from typing import List, Optional
 
 from llama_index.core import Document, Settings, StorageContext, VectorStoreIndex
 from llama_index.embeddings.openai import OpenAIEmbedding
-from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.vector_stores.qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 
@@ -53,6 +52,7 @@ class SessionVectorStore:
 
     def _get_embed_model(self):
         if "localhost:11434" in settings.openai_base_url or "127.0.0.1:11434" in settings.openai_base_url:
+            from llama_index.embeddings.ollama import OllamaEmbedding
             return OllamaEmbedding(
                 model_name="nomic-embed-text",
                 base_url=settings.openai_base_url.replace("/v1", ""),
