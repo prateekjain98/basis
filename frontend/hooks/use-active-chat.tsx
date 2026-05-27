@@ -29,6 +29,12 @@ import type { ChatMessage } from "@/lib/types";
 import { fetcher, fetchWithErrorHandlers, generateUUID, getTextFromMessage } from "@/lib/utils";
 import { ensureUser, createChat, createMessages, generateTitleFromUserMessage } from "@/app/(chat)/actions";
 
+function setCookie(name: string, value: string) {
+  const maxAge = 60 * 60 * 24 * 365;
+  // biome-ignore lint/suspicious/noDocumentCookie: needed for client-side cookie setting
+  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}`;
+}
+
 type ActiveChatContextValue = {
   chatId: string;
   messages: ChatMessage[];
@@ -158,6 +164,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
           body: {
             messages,
             session_id,
+            model: currentModelIdRef.current,
           },
         };
       },
@@ -303,6 +310,27 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       }
     }
   }, [chatData, isNewChat]);
+
+  // Fetch available models and ensure current model is valid
+  const { data: modelsData } = useSWR(
+    `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/models`,
+    fetcher,
+    { revalidateOnFocus: false }
+  );
+
+  useEffect(() => {
+    if (!modelsData) return;
+    const availableIds = new Set<string>(
+      modelsData.available_model_ids ?? []
+    );
+    const backendDefault = modelsData.default_model ?? DEFAULT_CHAT_MODEL;
+
+    // If current model is not available, switch to backend default
+    if (availableIds.size > 0 && !availableIds.has(currentModelId)) {
+      setCurrentModelId(backendDefault);
+      setCookie("chat-model", backendDefault);
+    }
+  }, [modelsData, currentModelId]);
 
   const hasAppendedQueryRef = useRef(false);
   useEffect(() => {

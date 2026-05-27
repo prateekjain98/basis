@@ -633,6 +633,11 @@ function PureModelSelectorCompact({
   const dynamicModels: ChatModel[] | undefined = modelsData?.models;
   const activeModels = dynamicModels?.length ? dynamicModels : chatModels;
 
+  // Available models are those returned by the backend /models endpoint
+  const availableModelIds = new Set<string>(
+    modelsData?.available_model_ids ?? []
+  );
+
   const selectedModel =
     activeModels.find((m: ChatModel) => m.id === selectedModelId) ??
     activeModels.find((m: ChatModel) => m.id === DEFAULT_CHAT_MODEL) ??
@@ -663,27 +668,31 @@ function PureModelSelectorCompact({
                 ]
               : chatModels;
 
+            // Group by provider. Show all models; lock unavailable ones.
             const grouped: Record<
               string,
-              { model: ChatModel; curated: boolean }[]
+              { model: ChatModel; available: boolean }[]
             > = {};
             for (const model of allModels) {
-              const key = curatedIds.has(model.id)
-                ? "_available"
-                : model.provider;
+              const key = model.provider;
               if (!grouped[key]) {
                 grouped[key] = [];
               }
-              grouped[key].push({ model, curated: curatedIds.has(model.id) });
+              grouped[key].push({
+                model,
+                available: availableModelIds.has(model.id),
+              });
             }
 
-            const sortedKeys = Object.keys(grouped).sort((a, b) => {
-              if (a === "_available") {
-                return -1;
-              }
-              if (b === "_available") {
-                return 1;
-              }
+            const sortedKeys = Object.keys(grouped).sort((a, b) =>
+              a.localeCompare(b)
+            );
+
+            // Put the provider of the default model first
+            const defaultProvider = DEFAULT_CHAT_MODEL.split("/")[0];
+            sortedKeys.sort((a, b) => {
+              if (a === defaultProvider) return -1;
+              if (b === defaultProvider) return 1;
               return a.localeCompare(b);
             });
 
@@ -714,14 +723,10 @@ function PureModelSelectorCompact({
 
             return sortedKeys.map((key) => (
               <ModelSelectorGroup
-                heading={
-                  key === "_available"
-                    ? "Available"
-                    : (providerNames[key] ?? key)
-                }
+                heading={providerNames[key] ?? key}
                 key={key}
               >
-                {grouped[key].map(({ model, curated }) => {
+                {grouped[key].map(({ model, available }) => {
                   const logoProvider = model.id.split("/")[0];
                   return (
                     <ModelSelectorItem
@@ -729,11 +734,11 @@ function PureModelSelectorCompact({
                         "flex w-full",
                         model.id === selectedModel.id &&
                           "border-b border-dashed border-foreground/50",
-                        !curated && "opacity-40 cursor-default"
+                        !available && "opacity-40 cursor-default"
                       )}
                       key={model.id}
                       onSelect={() => {
-                        if (!curated) {
+                        if (!available) {
                           return;
                         }
                         onModelChange?.(model.id);
@@ -761,7 +766,7 @@ function PureModelSelectorCompact({
                         {capabilities?.[model.id]?.reasoning && (
                           <BrainIcon className="size-3.5" />
                         )}
-                        {!curated && (
+                        {!available && (
                           <LockIcon className="size-3 text-muted-foreground/50" />
                         )}
                       </div>

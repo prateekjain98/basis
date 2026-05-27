@@ -101,13 +101,16 @@ class Agent:
         self.db = get_supabase()
 
     async def run(
-        self, query: str, session_id: Optional[str] = None, history: Optional[List[dict]] = None
+        self, query: str, session_id: Optional[str] = None, history: Optional[List[dict]] = None, model: Optional[str] = None
     ) -> AsyncIterator[str]:
         start_time = time.time()
         history = history or []
         is_followup = False
         existing_docs = []
         raw_data: dict = {"query": query, "documents": [], "chunks": [], "stocks": []}
+
+        # Use requested model if provided and valid
+        active_model = model if model else self.model
 
         # Total pipeline timeout: if we exceed this, return partial results
         PIPELINE_TIMEOUT = 75.0
@@ -264,7 +267,7 @@ class Agent:
 
         parsed = {"theme": query, "summary": "", "conviction": "Medium", "stocks": []}
         try:
-            raw = await _llm_chat(self.client, messages, self.model, temperature=0.3, max_tokens=3000)
+            raw = await _llm_chat(self.client, messages, active_model, temperature=0.3, max_tokens=3000)
             # Extract JSON from markdown fences or plain text preamble
             json_match = re.search(r'```json\s*(\{.*\})\s*```', raw, re.DOTALL)
             if json_match:

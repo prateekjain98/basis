@@ -1,11 +1,11 @@
-export const DEFAULT_CHAT_MODEL = "moonshotai/kimi-k2.5";
+export const DEFAULT_CHAT_MODEL = "gpt-4o-mini";
 
 export const titleModel = {
-  id: "moonshotai/kimi-k2.5",
-  name: "Kimi K2.5",
-  provider: "moonshotai",
+  id: "gpt-4o-mini",
+  name: "GPT-4o mini",
+  provider: "openai",
   description: "Fast model for title generation",
-  gatewayOrder: ["fireworks", "bedrock"],
+  gatewayOrder: ["openai"],
 };
 
 export type ModelCapabilities = {
@@ -25,41 +25,76 @@ export type ChatModel = {
 
 export const chatModels: ChatModel[] = [
   {
-    id: "deepseek/deepseek-v3.2",
-    name: "DeepSeek V3.2",
-    provider: "deepseek",
-    description: "Fast and capable model with tool use",
-    gatewayOrder: ["bedrock", "deepinfra"],
-  },
-  {
-    id: "moonshotai/kimi-k2.5",
-    name: "Kimi K2.5",
-    provider: "moonshotai",
-    description: "Moonshot AI flagship model",
-    gatewayOrder: ["fireworks", "bedrock"],
-  },
-  {
-    id: "openai/gpt-oss-20b",
-    name: "GPT OSS 20B",
+    id: "gpt-4o-mini",
+    name: "GPT-4o mini",
     provider: "openai",
-    description: "Compact reasoning model",
-    gatewayOrder: ["groq", "bedrock"],
-    reasoningEffort: "low",
+    description: "Fast, affordable model for most tasks",
+    gatewayOrder: ["openai"],
   },
   {
-    id: "openai/gpt-oss-120b",
-    name: "GPT OSS 120B",
+    id: "gpt-4o",
+    name: "GPT-4o",
     provider: "openai",
-    description: "Open-source 120B parameter model",
-    gatewayOrder: ["fireworks", "bedrock"],
-    reasoningEffort: "low",
+    description: "Most capable multimodal model",
+    gatewayOrder: ["openai"],
   },
   {
-    id: "xai/grok-4.1-fast-non-reasoning",
-    name: "Grok 4.1 Fast",
-    provider: "xai",
-    description: "Fast non-reasoning model with tool use",
-    gatewayOrder: ["xai"],
+    id: "o3-mini",
+    name: "o3-mini",
+    provider: "openai",
+    description: "Fast reasoning model",
+    gatewayOrder: ["openai"],
+    reasoningEffort: "medium",
+  },
+  {
+    id: "o1",
+    name: "o1",
+    provider: "openai",
+    description: "Advanced reasoning model",
+    gatewayOrder: ["openai"],
+    reasoningEffort: "medium",
+  },
+  {
+    id: "claude-3-5-haiku-20241022",
+    name: "Claude 3.5 Haiku",
+    provider: "anthropic",
+    description: "Fast Anthropic model",
+    gatewayOrder: ["anthropic"],
+  },
+  {
+    id: "claude-3-5-sonnet-20241022",
+    name: "Claude 3.5 Sonnet",
+    provider: "anthropic",
+    description: "Capable Anthropic model",
+    gatewayOrder: ["anthropic"],
+  },
+  {
+    id: "claude-3-opus-20240229",
+    name: "Claude 3 Opus",
+    provider: "anthropic",
+    description: "Most capable Anthropic model",
+    gatewayOrder: ["anthropic"],
+  },
+  {
+    id: "gemini-2.0-flash-001",
+    name: "Gemini 2.0 Flash",
+    provider: "google",
+    description: "Fast Google model",
+    gatewayOrder: ["google"],
+  },
+  {
+    id: "gemini-2.5-pro-preview-03-25",
+    name: "Gemini 2.5 Pro",
+    provider: "google",
+    description: "Most capable Google model",
+    gatewayOrder: ["google"],
+  },
+  {
+    id: "gemini-2.0-flash-lite-001",
+    name: "Gemini 2.0 Flash Lite",
+    provider: "google",
+    description: "Lightweight Google model",
+    gatewayOrder: ["google"],
   },
 ];
 
@@ -68,38 +103,17 @@ export async function getCapabilities(): Promise<
 > {
   const results = await Promise.all(
     chatModels.map(async (model) => {
-      try {
-        const res = await fetch(
-          `https://ai-gateway.vercel.sh/v1/models/${model.id}/endpoints`,
-          { next: { revalidate: 86_400 } }
-        );
-        if (!res.ok) {
-          return [model.id, { tools: false, vision: false, reasoning: false }];
-        }
-
-        const json = await res.json();
-        const endpoints = json.data?.endpoints ?? [];
-        const params = new Set(
-          endpoints.flatMap(
-            (e: { supported_parameters?: string[] }) =>
-              e.supported_parameters ?? []
-          )
-        );
-        const inputModalities = new Set(
-          json.data?.architecture?.input_modalities ?? []
-        );
-
-        return [
-          model.id,
-          {
-            tools: params.has("tools"),
-            vision: inputModalities.has("image"),
-            reasoning: params.has("reasoning"),
-          },
-        ];
-      } catch {
-        return [model.id, { tools: false, vision: false, reasoning: false }];
-      }
+      // All our models support tools and reasoning; vision is provider-specific
+      const hasVision = model.provider === "openai" || model.provider === "google";
+      const hasReasoning = model.id.startsWith("o") || model.id.includes("reasoning");
+      return [
+        model.id,
+        {
+          tools: true,
+          vision: hasVision,
+          reasoning: hasReasoning,
+        },
+      ];
     })
   );
 

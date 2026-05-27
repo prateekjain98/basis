@@ -37,9 +37,12 @@ export async function POST(request: Request) {
 
   const sessionId = body.session_id as string | undefined | null;
 
+  const model = body.model as string | undefined | null;
+
   const backendBody = {
     messages,
     session_id: sessionId || null,
+    model: model || null,
   };
 
   try {

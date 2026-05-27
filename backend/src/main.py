@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from src.agent import Agent
+from src.config import settings
 from src.db.supabase_client import get_supabase
 from src.tools.vector_store import SessionVectorStore
 
@@ -38,6 +39,7 @@ agent = Agent()
 class ChatRequest(BaseModel):
     messages: List[dict]
     session_id: Optional[str] = None
+    model: Optional[str] = None
 
 
 @app.post("/chat")
@@ -49,7 +51,7 @@ async def chat(req: ChatRequest) -> StreamingResponse:
     query = user_msgs[-1].get("content", "")
 
     async def generate() -> AsyncIterator[str]:
-        async for chunk in agent.run(query, session_id=req.session_id, history=req.messages):
+        async for chunk in agent.run(query, session_id=req.session_id, history=req.messages, model=req.model):
             yield chunk
 
     return StreamingResponse(generate(), media_type="text/plain")
@@ -125,6 +127,50 @@ async def delete_session(session_id: str) -> dict:
         print(f"[API] delete_session error: {e}")
     SessionVectorStore().delete_session(session_id)
     return {"deleted": session_id}
+
+
+@app.get("/models")
+async def list_models() -> dict:
+    """Return available models based on configured API keys."""
+    available = []
+    default = None
+
+    if settings.vertex_project:
+        available.extend([
+            "gemini-2.0-flash-001",
+            "gemini-2.5-pro-preview-03-25",
+            "gemini-2.0-flash-lite-001",
+        ])
+        default = settings.vertex_model or "gemini-2.0-flash-001"
+
+    if settings.anthropic_api_key:
+        available.extend([
+            "claude-3-5-haiku-20241022",
+            "claude-3-5-sonnet-20241022",
+            "claude-3-opus-20240229",
+        ])
+        if not default:
+            default = settings.anthropic_model or "claude-3-5-haiku-20241022"
+
+    if settings.openai_api_key:
+        available.extend([
+            "gpt-4o-mini",
+            "gpt-4o",
+            "o3-mini",
+            "o1",
+        ])
+        if not default:
+            default = settings.llm_model or "gpt-4o-mini"
+
+    return {
+        "available_models": available,
+        "default_model": default or "gpt-4o-mini",
+        "providers": {
+            "openai": bool(settings.openai_api_key),
+            "anthropic": bool(settings.anthropic_api_key),
+            "google": bool(settings.vertex_project),
+        },
+    }
 
 
 @app.get("/health")
