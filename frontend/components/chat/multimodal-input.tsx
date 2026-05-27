@@ -634,10 +634,8 @@ function PureModelSelectorCompact({
   const activeModels = dynamicModels?.length ? dynamicModels : chatModels;
 
   // Available models are those returned by the backend /models endpoint.
-  // Fallback: if the backend hasn't responded yet, assume all models are available
-  // so the user can still interact with the selector.
   const availableModelIds = new Set<string>(
-    modelsData?.available_model_ids ?? chatModels.map((m) => m.id)
+    modelsData?.available_model_ids ?? []
   );
 
   const selectedModel =
@@ -670,31 +668,31 @@ function PureModelSelectorCompact({
                 ]
               : chatModels;
 
-            // Group by provider. Show all models; lock unavailable ones.
             const grouped: Record<
               string,
-              { model: ChatModel; available: boolean }[]
+              { model: ChatModel; curated: boolean; available: boolean }[]
             > = {};
             for (const model of allModels) {
-              const key = model.provider;
+              const key = curatedIds.has(model.id)
+                ? "_available"
+                : model.provider;
               if (!grouped[key]) {
                 grouped[key] = [];
               }
               grouped[key].push({
                 model,
+                curated: curatedIds.has(model.id),
                 available: availableModelIds.has(model.id),
               });
             }
 
-            const sortedKeys = Object.keys(grouped).sort((a, b) =>
-              a.localeCompare(b)
-            );
-
-            // Put the provider of the default model first
-            const defaultProvider = DEFAULT_CHAT_MODEL.split("/")[0];
-            sortedKeys.sort((a, b) => {
-              if (a === defaultProvider) return -1;
-              if (b === defaultProvider) return 1;
+            const sortedKeys = Object.keys(grouped).sort((a, b) => {
+              if (a === "_available") {
+                return -1;
+              }
+              if (b === "_available") {
+                return 1;
+              }
               return a.localeCompare(b);
             });
 
@@ -725,10 +723,14 @@ function PureModelSelectorCompact({
 
             return sortedKeys.map((key) => (
               <ModelSelectorGroup
-                heading={providerNames[key] ?? key}
+                heading={
+                  key === "_available"
+                    ? "Available"
+                    : (providerNames[key] ?? key)
+                }
                 key={key}
               >
-                {grouped[key].map(({ model, available }) => {
+                {grouped[key].map(({ model, curated, available }) => {
                   const logoProvider = model.id.split("/")[0];
                   return (
                     <ModelSelectorItem
@@ -736,16 +738,13 @@ function PureModelSelectorCompact({
                         "flex w-full",
                         model.id === selectedModel.id &&
                           "border-b border-dashed border-foreground/50",
-                        !available && "opacity-40 cursor-default"
+                        !curated && "opacity-40 cursor-default"
                       )}
                       key={model.id}
                       onSelect={() => {
-                        console.log("[ModelSelector] onSelect fired for", model.id, "available=", available);
-                        if (!available) {
-                          console.log("[ModelSelector] model not available, skipping");
+                        if (!curated) {
                           return;
                         }
-                        console.log("[ModelSelector] calling onModelChange with", model.id, "onModelChange=", typeof onModelChange);
                         onModelChange?.(model.id);
                         setCookie("chat-model", model.id);
                         setOpen(false);
@@ -771,7 +770,7 @@ function PureModelSelectorCompact({
                         {capabilities?.[model.id]?.reasoning && (
                           <BrainIcon className="size-3.5" />
                         )}
-                        {!available && (
+                        {!available && curated && (
                           <LockIcon className="size-3 text-muted-foreground/50" />
                         )}
                       </div>
