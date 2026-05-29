@@ -238,27 +238,57 @@ class Agent:
 
         context = "\n\n".join(chunks)
 
+        # --- Augment follow-up context with fresh web search ----------------
+        if is_followup:
+            yield "**Searching** for fresh data on your follow-up...\n\n"
+            try:
+                web_results = await asyncio.to_thread(self.web_search.run, query, max_results=5)
+                fresh_chunks = [f"{r.title}: {r.snippet}" for r in web_results]
+                if fresh_chunks:
+                    yield f"- Found {len(fresh_chunks)} fresh sources\n\n"
+                    context += "\n\n--- FRESH FOLLOW-UP RESEARCH ---\n\n" + "\n\n".join(fresh_chunks)
+            except Exception as e:
+                print(f"[Agent] Follow-up web search error: {e}")
+
         # --- LLM synthesis --------------------------------------------------
         yield "**Analyzing**...\n\n"
 
-        system_msg = (
-            "You are a senior equity research analyst. Read the research context, "
-            "extract key investment themes, and map each theme to specific public companies.\n\n"
-            "STEP-BY-STEP PROCESS — you MUST follow these steps:\n"
-            "1. List the KEY BOTTLENECKS or themes described in the research context.\n"
-            "2. For EACH bottleneck, name 3-5 PUBLIC COMPANIES that are pure-plays or major beneficiaries. Aim for 5-7 total stocks.\n"
-            "3. Explain the logical connection for each: 'Thesis says X → Company Y does Z → Y benefits.'\n"
-            "4. AVOID generic giants (AAPL, GOOGL, MSFT, AMZN, META, TSLA). Prefer pure-plays.\n\n"
-            "Return ONLY valid JSON:\n"
-            '{"theme":"...","summary":"...","conviction":"High|Medium|Low","stocks":['
-            '{"ticker":"BE","name":"Bloom Energy","rationale":"Thesis argues data centers need on-site fuel cells. BE manufactures solid-oxide fuel cells.","thematic_fit_score":95}]}'
-        )
+        if is_followup:
+            system_msg = (
+                "You are a senior equity research analyst. This is a FOLLOW-UP question from the user "
+                "about a previous investment thesis. Answer their question directly and thoroughly.\n\n"
+                "RULES:\n"
+                "1. If the user asks about a SPECIFIC stock or ticker (e.g., 'dive deeper into NVST'), "
+                "   provide deep analysis on ONLY that stock. Include: business model, financial health, "
+                "   competitive position, risks, catalysts, and a clear buy/hold/sell stance.\n"
+                "2. If the user asks a GENERAL question (e.g., 'what are the risks?'), answer using the research context.\n"
+                "3. DO NOT generate a new list of unrelated stocks unless the user explicitly asks for alternatives.\n"
+                "4. Be concise but thorough. Cite specific data points from the research context when possible.\n\n"
+                "Return ONLY valid JSON:\n"
+                '{"theme":"...","summary":"...","conviction":"High|Medium|Low","stocks":['
+                '{"ticker":"NVST","name":"Envista Holdings","rationale":"Detailed analysis focused on the user question...","thematic_fit_score":85}]}'
+            )
+        else:
+            system_msg = (
+                "You are a senior equity research analyst. Read the research context, "
+                "extract key investment themes, and map each theme to specific public companies.\n\n"
+                "STEP-BY-STEP PROCESS — you MUST follow these steps:\n"
+                "1. List the KEY BOTTLENECKS or themes described in the research context.\n"
+                "2. For EACH bottleneck, name 3-5 PUBLIC COMPANIES that are pure-plays or major beneficiaries. Aim for 5-7 total stocks.\n"
+                "3. Explain the logical connection for each: 'Thesis says X → Company Y does Z → Y benefits.'\n"
+                "4. AVOID generic giants (AAPL, GOOGL, MSFT, AMZN, META, TSLA). Prefer pure-plays.\n\n"
+                "Return ONLY valid JSON:\n"
+                '{"theme":"...","summary":"...","conviction":"High|Medium|Low","stocks":['
+                '{"ticker":"BE","name":"Bloom Energy","rationale":"Thesis argues data centers need on-site fuel cells. BE manufactures solid-oxide fuel cells.","thematic_fit_score":95}]}'
+            )
 
         messages = [{"role": "system", "content": system_msg}]
         if is_followup and history:
+            # Include full conversation history so the LLM knows what was previously discussed
             for m in history[-6:]:
-                if m.get("role") == "user":
-                    messages.append({"role": "user", "content": m["content"]})
+                role = m.get("role")
+                if role in ("user", "assistant"):
+                    messages.append({"role": role, "content": m["content"]})
 
         messages.append({
             "role": "user",
