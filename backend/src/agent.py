@@ -460,8 +460,8 @@ class Agent:
             if s["entry"]:
                 lines.append(f"  - Entry: ${s['entry']:,.2f}")
             lines.append(
-                f"  - F:{s['fundamentals']} T:{s['thematic_fit']} R:{s['risk']} "
-                f"M:{s['momentum']} L:{s['liquidity']}"
+                f"  - Fundamentals: {s['fundamentals']} | Thematic Fit: {s['thematic_fit']} | Risk: {s['risk']} | "
+                f"Momentum: {s['momentum']} | Liquidity: {s['liquidity']}"
             )
             lines.append(f"  - {s['rationale']}")
             lines.append("")
