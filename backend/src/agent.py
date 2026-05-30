@@ -65,11 +65,26 @@ async def _llm_chat_vertex(messages, model, temperature, max_tokens, timeout_sec
         temperature=temperature,
         max_output_tokens=max_tokens,
     )
-    resp = gemini.models.generate_content(model=model, contents=user_msgs, config=config)
+    # generate_content is synchronous — run in a thread so it doesn't block the event loop
+    resp = await asyncio.wait_for(
+        asyncio.to_thread(
+            gemini.models.generate_content,
+            model=model,
+            contents=user_msgs,
+            config=config,
+        ),
+        timeout=timeout_sec,
+    )
     return resp.text or "{}"
 
 
 async def _llm_chat_anthropic(client, messages, model, temperature, max_tokens, timeout_sec: float):
+    from anthropic import AsyncAnthropic
+
+    if not isinstance(client, AsyncAnthropic):
+        raise ValueError(
+            f"Expected AsyncAnthropic client, got {type(client).__name__}"
+        )
     system_msg = ""
     user_msgs = []
     for m in messages:
@@ -96,7 +111,7 @@ async def _llm_chat(client, messages, model, temperature, max_tokens, timeout_se
         return await _llm_chat_openai(client, messages, model, temperature, max_tokens, timeout_sec)
     if client == "vertex":
         return await _llm_chat_vertex(messages, model, temperature, max_tokens, timeout_sec)
-    # Anthropic
+    # Anthropic (validated inside _llm_chat_anthropic)
     return await _llm_chat_anthropic(client, messages, model, temperature, max_tokens, timeout_sec)
 from src.db.supabase_client import get_supabase
 from src.tools.document_fetcher import DocumentFetcher
